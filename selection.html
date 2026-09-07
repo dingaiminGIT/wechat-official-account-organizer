@@ -69,7 +69,7 @@ async function connectWeChat(retry=false){
  if(!waitingMiniapp)$('setupmessage').textContent='正在检查环境、核实账号并读取公众号…';
  try{applyState(await api('/api/connect',{}));waitingMiniapp=false;$('cancelconnect').classList.add('hidden');autoAttempts=0;message('微信已连接，清单已保留。核对后点击“开始取关”。')}
  catch(e){message(e.message,true);await refreshJob();
-  if(e.message.includes('小程序')&&autoAttempts++<6){waitingMiniapp=true;$('cancelconnect').classList.remove('hidden');$('setupmessage').textContent='请在微信打开一个小程序，例如腾讯文档。只打开“小程序列表”还不够；已打开的请关闭后重开。应用最多等待约 40 秒。';waitTimer=setTimeout(()=>connectWeChat(true),5000)}
+ if(e.message.includes('小程序')&&autoAttempts++<6){waitingMiniapp=true;$('cancelconnect').classList.remove('hidden');$('setupmessage').textContent='应用正在自动查找已打开的小程序并重试连接。若当前没有小程序窗口，请在微信打开一个小程序；应用会在检测到有效目标后自动继续，最多等待约 40 秒。';waitTimer=setTimeout(()=>connectWeChat(true),5000)}
   else{waitingMiniapp=false;$('cancelconnect').classList.add('hidden');$('setupmessage').textContent=e.message.includes('小程序')?'等待已结束，尚未收到小程序连接。请打开腾讯文档等小程序，再点连接。':e.message;message($('setupmessage').textContent,true)}
  }finally{connecting=false;update()}
 }
