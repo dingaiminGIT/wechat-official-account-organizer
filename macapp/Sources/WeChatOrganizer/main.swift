@@ -1,5 +1,6 @@
 import AppKit
 import WebKit
+import ApplicationServices
 
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScriptMessageHandler {
     var window: NSWindow!
@@ -27,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         edit.addItem(withTitle:"粘贴",action:#selector(NSText.paste(_:)),keyEquivalent:"v")
         edit.addItem(withTitle:"全选",action:#selector(NSText.selectAll(_:)),keyEquivalent:"a")
         NSApp.mainMenu=menu
-        let config=WKWebViewConfiguration();config.userContentController.add(self,name:"environment")
+        let config=WKWebViewConfiguration();config.userContentController.add(self,name:"environment");config.userContentController.add(self,name:"miniapp")
         web=WKWebView(frame:.zero,configuration:config);web.navigationDelegate=self
         window=NSWindow(contentRect:NSRect(x:0,y:0,width:1150,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
         window.title="公众号整理";window.minSize=NSSize(width:760,height:620);window.contentView=web;window.center();window.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
@@ -78,6 +79,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         decisionHandler(url.scheme=="about" || (url.host=="127.0.0.1" && url.port==8876) ? .allow:.cancel)
     }
     func userContentController(_ userContentController:WKUserContentController,didReceive message:WKScriptMessage){
+        if message.name=="miniapp" {
+            guard message.frameInfo.isMainFrame, message.frameInfo.request.url?.host=="127.0.0.1",message.frameInfo.request.url?.port==8876 else{return}
+            Task { _ = await attemptOpenRecentMiniapp() }
+            return
+        }
         guard message.frameInfo.isMainFrame, message.frameInfo.request.url?.host=="127.0.0.1",message.frameInfo.request.url?.port==8876,let action=message.body as? String,["prepare","restore"].contains(action) else{return}
         let alert=NSAlert();alert.messageText=action=="prepare" ? "准备微信连接环境":"恢复微信原始文件"
         alert.informativeText=action=="prepare" ? "这会备份并调整已验证版本的微信辅助程序签名。不会读取聊天内容或关闭系统保护。请先完全退出微信；接下来由系统请求管理员授权。" : "将关闭本工具的连接，并把微信辅助程序恢复为本机备份的原始文件。请先完全退出微信；版本不匹配时会拒绝覆盖。"
@@ -94,6 +100,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             let result=(try? JSONSerialization.jsonObject(with:bytes)) as? [String:Any]
             throw NSError(domain:"WeChatOrganizer",code:1,userInfo:[NSLocalizedDescriptionKey:result?["error"] as? String ?? "请先停止队列并等待当前账号完成"])
         }
+    }
+    func attemptOpenRecentMiniapp() async -> Bool {
+        guard AXIsProcessTrusted(), let app=NSRunningApplication.runningApplications(withBundleIdentifier:"com.tencent.xinWeChat").first else { return false }
+        app.activate(); try? await Task.sleep(nanoseconds:300_000_000)
+        let rows=CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements],kCGNullWindowID) as? [[String:Any]] ?? []
+        guard let main=rows.compactMap({ row -> (CGRect,String)? in
+            guard row[kCGWindowOwnerPID as String] as? Int32 == app.processIdentifier,
+                  let bounds=row[kCGWindowBounds as String] as? [String:Any],
+                  let frame=CGRect(dictionaryRepresentation: bounds as CFDictionary), frame.width > 700, frame.height > 500 else { return nil }
+            return (frame,row[kCGWindowName as String] as? String ?? "")
+        }).first(where: {$0.1 == "微信" || $0.1 == "WeChat"}) else { return false }
+        let before=Set(rows.compactMap {$0[kCGWindowOwnerPID as String] as? Int32 == app.processIdentifier ? $0[kCGWindowNumber as String] as? UInt32 : nil})
+        let source=CGEventSource(stateID:.combinedSessionState)
+        for y in [main.0.minY+225,main.0.minY+240,main.0.minY+255] {
+            let point=CGPoint(x:main.0.minX+30,y:y)
+            CGEvent(mouseEventSource:source,mouseType:.leftMouseDown,mouseCursorPosition:point,mouseButton:.left)?.post(tap:.cgSessionEventTap)
+            usleep(80_000)
+            CGEvent(mouseEventSource:source,mouseType:.leftMouseUp,mouseCursorPosition:point,mouseButton:.left)?.post(tap:.cgSessionEventTap)
+            try? await Task.sleep(nanoseconds:700_000_000)
+            let latest=CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements],kCGNullWindowID) as? [[String:Any]] ?? []
+            let opened=latest.contains { row in
+                guard row[kCGWindowOwnerPID as String] as? Int32 == app.processIdentifier,
+                      let id=row[kCGWindowNumber as String] as? UInt32, !before.contains(id) else { return false }
+                let title=row[kCGWindowName as String] as? String ?? ""
+                return title == "微信 (窗口)" || title == "WeChat (Window)"
+            }
+            if opened { return true }
+            let escapeDown=CGEvent(keyboardEventSource:source,virtualKey:53,keyDown:true)
+            let escapeUp=CGEvent(keyboardEventSource:source,virtualKey:53,keyDown:false)
+            escapeDown?.post(tap:.cgSessionEventTap);escapeUp?.post(tap:.cgSessionEventTap)
+        }
+        return false
     }
     func shellQuote(_ s:String)->String {"'"+s.replacingOccurrences(of:"'",with:"'\\''")+"'"}
     func appleString(_ s:String)->String {"\""+s.replacingOccurrences(of:"\\",with:"\\\\").replacingOccurrences(of:"\"",with:"\\\"")+"\""}
