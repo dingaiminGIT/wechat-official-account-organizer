@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+"""Local app service. Account-scoped storage, fail-closed compatibility, serial jobs."""
+from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+from pathlib import Path
+import datetime,json,os,secrets,signal,sys,threading,time,uuid
+import runtime_guard
+from bridge_manager import BridgeManager
+ROOT=Path(os.environ.get('WECHAT_RESOURCES',Path(__file__).resolve().parent))
+DATA=Path(os.environ.get('WECHAT_DATA_ROOT',ROOT/'.runtime'))
+HOST='127.0.0.1:8876';LOCK=threading.RLock();STOP=threading.Event()
+CURRENT=None;WORKER=None;CHECKS={};CONNECTING=False;CLOSING=threading.Event()
+SCOPED={'live-accounts-probe.json','whitelist.json','selected-accounts.json','unfollow-job.json','account-history.json'}
+MANAGER=BridgeManager(ROOT,DATA)
+EMPTY={'accounts':[],'capturedAt':None}
+HISTORY_DAYS=30
+
+def now():return datetime.datetime.now(datetime.timezone.utc).isoformat()
+def path(name):
+    if name in SCOPED:
+        if not CURRENT:raise RuntimeError('请先连接并确认当前微信账号')
+        return DATA/'accounts'/CURRENT['profile_key']/name
+    return DATA/name
+
+def read(name,default=None):
+    if name in SCOPED and not CURRENT:return default
+    p=path(name);return json.loads(p.read_text()) if p.exists() else default
+
+def write(name,value):
+    write_path(path(name),value)
+
+def write_path(p,value):
+    p.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+    tmp=p.with_name(p.name+'.tmp');fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+    with os.fdopen(fd,'w') as f:json.dump(value,f,ensure_ascii=False,indent=2);f.flush();os.fsync(f.fileno())
+    os.replace(tmp,p);p.chmod(0o600)
+
+def parsed_date(value):
+    try:
+        dt=datetime.datetime.fromisoformat(value.replace('Z','+00:00'))
+        return dt.replace(tzinfo=datetime.timezone.utc) if dt.tzinfo is None else dt
+    except (AttributeError,TypeError,ValueError):return None
+
+def prune_history(folder,at=None):
+    """Expire recovery data; never touch a whitelist or an executing job."""
+    if active():return
+    at=at or datetime.datetime.now(datetime.timezone.utc)
+    cutoff=at-datetime.timedelta(days=HISTORY_DAYS)
+    catalog_path=folder/'live-accounts-probe.json'
+    if catalog_path.exists():
+        catalog=json.loads(catalog_path.read_text());before=json.dumps(catalog);kept=[]
+        for a in catalog.get('accounts',[]):
+            if a.get('was_unfollowed') or a.get('subscribed') is False:
+                started=parsed_date(a.get('unfollowed_at')) or parsed_date(a.get('history_started_at')) or parsed_date(catalog.get('capturedAt')) or at
+                if started<=cutoff:
+                    if a.get('subscribed') is False:continue
+                    for k in ('was_unfollowed','unfollowed_at','refollowed_at','history_started_at','history_expires_at'):a.pop(k,None)
+                else:
+                    a.setdefault('history_started_at',started.isoformat())
+                    a['history_expires_at']=(started+datetime.timedelta(days=HISTORY_DAYS)).isoformat()
+            kept.append(a)
+        catalog['accounts']=kept
+        if json.dumps(catalog)!=before:write_path(catalog_path,catalog)
+    events=folder/'account-history.json'
+    if events.exists():
+        records=json.loads(events.read_text());kept=[e for e in records if (parsed_date(e.get('at')) or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc))>cutoff]
+        if kept!=records:write_path(events,kept)
+    for name,field in [('unfollow-job.json','finished_at'),('selected-accounts.json','created_at')]:
+        p=folder/name
+        if p.exists():
+            obj=json.loads(p.read_text());stamp=parsed_date(obj.get(field)) or parsed_date(obj.get('started_at')) or datetime.datetime.fromtimestamp(p.stat().st_mtime,datetime.timezone.utc)
+            if stamp<=cutoff:p.unlink()
+
+def data():return read('live-accounts-probe.json',EMPTY)
+def white():return read('whitelist.json',{'ids':[]})['ids']
+def job():return read('unfollow-job.json')
+def active():return bool(WORKER and WORKER.is_alive())
+def token():
+    v=read('web-token.json')
+    if not v:v={'token':secrets.token_urlsafe(32)};write('web-token.json',v)
+    return v['token']
+
+def preflight():return runtime_guard.preflight(ROOT,DATA)
+def verify_identity(expected=None):
+    expected=expected or CURRENT
+    if not expected:raise RuntimeError('请先连接微信')
+    actual=runtime_guard.identity()
+    if any(actual.get(k)!=expected.get(k) for k in ('profile_key','session_key')):raise RuntimeError('微信账号或登录会话已变化，请重新连接；旧清单不可继续执行')
+    return actual
+
+def ensure_ready(check_identity=True):
+    c=preflight()
+    if not c['compatible'] or not c['prepared']:raise RuntimeError(c['message'] if not c['compatible'] else '请先完成环境准备')
+    if check_identity:verify_identity()
+    if not MANAGER.call('health').get('connected'):raise RuntimeError('微信连接已断开，请保留小程序窗口后重新连接')
+
+def connection():
+    if not CURRENT:return {'connected':False,'message':'尚未连接微信，请先检查环境并连接'}
+    try:
+        verify_identity()
+        if MANAGER.process is None or MANAGER.process.poll() is not None:raise RuntimeError('连接服务未启动，请重新连接')
+        # Native TCP peer count is only a transport indicator, never identity proof.
+        p=__import__('subprocess').run(['/usr/sbin/lsof','-nP','-iTCP:9421','-sTCP:ESTABLISHED','-F','n'],capture_output=True,text=True,timeout=3)
+        if '127.0.0.1:9421->127.0.0.1:' not in p.stdout:raise RuntimeError('请打开微信小程序并保留窗口，然后重新连接')
+        return {'connected':True,'message':'已连接 · '+CURRENT['label']}
+    except Exception as e:
+        if active():STOP.set()
+        return {'connected':False,'message':str(e)}
+
+def snapshot():
+    c=connection();visible=False
+    try:verify_identity();visible=True
+    except Exception:pass
+    with LOCK:
+        if visible:prune_history(path('live-accounts-probe.json').parent)
+        return {'history_retention_days':HISTORY_DAYS,'catalog':data() if visible else EMPTY,'whitelist':white() if visible else [],'plan':read('selected-accounts.json') if visible else None,'job':job() if visible else None,'identity':CURRENT if visible else None,'connection':c,'preflight':CHECKS,'connecting':CONNECTING}
+
+def ids_checked(ids):
+    known={a['id']:a for a in data()['accounts']}
+    if not isinstance(ids,list) or not all(isinstance(i,str) for i in ids) or len(ids)!=len(set(ids)) or not set(ids)<=known.keys():raise ValueError('包含重复或未知账号，请重新加载列表')
+    return known
+
+def bind_request(req):
+    verify_identity()
+    if req.get('profile_key')!=CURRENT['profile_key'] or req.get('session_key')!=CURRENT['session_key']:raise ValueError('页面账号已过期，请重新连接并选择账号')
+
+def connect():
+    global CURRENT,CHECKS
+    if CLOSING.is_set():raise RuntimeError('应用正在退出')
+    CHECKS=preflight()
+    if not CHECKS['compatible']:raise RuntimeError(CHECKS['message'])
+    if not CHECKS['prepared']:raise RuntimeError('此微信尚未准备连接环境。请在应用菜单中查看“环境准备与恢复”。')
+    identity=runtime_guard.identity()
+    MANAGER.start()
+    listing=MANAGER.call('list',identity)
+    verify_identity(identity)
+    if CLOSING.is_set():raise RuntimeError('应用正在退出')
+    with LOCK:
+        CURRENT=identity
+        prune_history(path('live-accounts-probe.json').parent)
+        previous=data();old={a['id']:a for a in previous['accounts']}
+    fresh={a['id']:a for a in listing['accounts']}
+    for account_id,a in fresh.items():
+        if old.get(account_id,{}).get('subscribed') is False or old.get(account_id,{}).get('was_unfollowed'):
+            result=MANAGER.call('check',identity,account_id)
+            a.update(subscribed=result['subscribed'],following_verified=True,was_unfollowed=True)
+            for k in ('unfollowed_at','refollowed_at','history_started_at','history_expires_at'):
+                if k in old[account_id]:a[k]=old[account_id][k]
+    for account_id,a in old.items():
+        if account_id not in fresh and (a.get('subscribed') is False or a.get('was_unfollowed')):fresh[account_id]=a
+    listing['accounts']=list(fresh.values())
+    verify_identity(identity)
+    with LOCK:
+        write('live-accounts-probe.json',listing)
+        if read('whitelist.json') is None:write('whitelist.json',{'ids':[]})
+        oldjob=job()
+        if oldjob and oldjob['status'] in ('running','stopping'):
+            oldjob.update(status='paused',message='上次执行中断，继续前将重新核对状态。');write('unfollow-job.json',oldjob)
+        plan=read('selected-accounts.json')
+        if plan and plan.get('session_key')!=identity['session_key']:
+            plan.update(consumed=True);write('selected-accounts.json',plan)
+    return snapshot()
+
+def action(account_id):return MANAGER.call('unfollow',CURRENT,account_id)
+def record_execution(j,index,started):
+    elapsed=max(0,round((time.monotonic()-started)*1000));item=j['items'][index]
+    item['execution_ms']=item.get('execution_ms',0)+elapsed;item['execution_finished_at']=now();item.pop('execution_started_at',None);j['execution_ms']=j.get('execution_ms',0)+elapsed
+
+def run_job(job_id):
+    try:
+        for index in range(len(job()['items'])):
+            with LOCK:
+                j=job()
+                if j['id']!=job_id:return
+                if STOP.is_set():break
+                item=j['items'][index]
+                if item['status'] in ('unfollowed','already_unfollowed','followed','already_followed'):continue
+            started=time.monotonic();invoked=False
+            try:
+                ensure_ready(check_identity=False)
+                with LOCK:
+                    if STOP.is_set():break
+                    if j.get('kind')!='follow' and item['id'] in white():raise RuntimeError('账号已在白名单中，执行停止')
+                    j=job();j['items'][index].update(status='running',execution_started_at=now());write('unfollow-job.json',j)
+                started=time.monotonic();invoked=True;result=MANAGER.call('follow',CURRENT,item['id']) if j.get('kind')=='follow' else action(item['id']);verify_identity()
+            except Exception as e:
+                with LOCK:
+                    j=job();detail=getattr(e,'result',{}) if invoked else {'mutation_sent':False,'stage':'preflight'};j['items'][index].update(status='blocked' if detail.get('mutation_sent') is False else 'uncertain',message=str(e),diagnostic=detail)
+                    record_execution(j,index,started);j.update(status='paused',message='已暂停。继续前会重新核对账号和关注状态。',finished_at=now());write('unfollow-job.json',j)
+                return
+            with LOCK:
+                j=job();j['items'][index].update(status=result['status'],message={'unfollowed':'已取关并复核','already_unfollowed':'已未关注，跳过','followed':'已重新关注并复核','already_followed':'已经关注，已复核'}[result['status']],result=result);record_execution(j,index,started);write('unfollow-job.json',j)
+                catalog=data()
+                for a in catalog['accounts']:
+                    if a['id']==item['id']:
+                        a.update(subscribed=result['subscribed'],following_verified=True,was_unfollowed=True)
+                        a['refollowed_at' if result['subscribed'] else 'unfollowed_at']=now()
+                        if not result['subscribed']:
+                            a['history_started_at']=a['unfollowed_at']
+                            a['history_expires_at']=(parsed_date(a['unfollowed_at'])+datetime.timedelta(days=HISTORY_DAYS)).isoformat()
+                write('live-accounts-probe.json',catalog)
+                history=read('account-history.json',[]);history.append({'id':item['id'],'name':item.get('name',''),'action':j.get('kind','unfollow'),'status':result['status'],'at':now(),'execution_ms':j['items'][index].get('execution_ms')});write('account-history.json',history)
+                if j.get('kind')=='follow' and j.get('protect_after'):
+                    write('whitelist.json',{'ids':list(dict.fromkeys([*white(),item['id']])),'updated_at':now()})
+            if STOP.is_set():break
+        with LOCK:
+            j=job();j.update(status='stopped' if STOP.is_set() else 'completed',finished_at=now());write('unfollow-job.json',j)
+    except Exception as e:
+        with LOCK:
+            j=job()
+            if j:j.update(status='paused',message=str(e));write('unfollow-job.json',j)
+
+def launch_job(j):
+    global WORKER
+    write('unfollow-job.json',j);STOP.clear();WORKER=threading.Thread(target=run_job,args=(j['id'],),daemon=True);WORKER.start()
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self,*args):pass
+    def send(self,status,payload,kind='application/json; charset=utf-8'):
+        self.send_response(status)
+        for k,v in {'Content-Type':kind,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Content-Security-Policy':"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"}.items():self.send_header(k,v)
+        self.end_headers()
+        try:self.wfile.write(payload.encode() if isinstance(payload,str) else json.dumps(payload,ensure_ascii=False).encode())
+        except (BrokenPipeError,ConnectionResetError):pass
+    def do_GET(self):
+        if self.headers.get('Host')!=HOST:return self.send(403,{'error':'host'})
+        try:
+            if self.path=='/':return self.send(200,(ROOT/'selection.html').read_text().replace('__TOKEN__',token()),'text/html; charset=utf-8')
+            if self.path=='/api/state':return self.send(200,snapshot())
+            if self.path=='/api/connection':return self.send(200,connection())
+            if self.path=='/api/preflight':return self.send(200,preflight())
+            return self.send(404,{'error':'not found'})
+        except Exception as e:return self.send(500,{'error':str(e)})
+    def do_POST(self):
+        global CURRENT,CHECKS,CONNECTING
+        try:size=int(self.headers.get('Content-Length','0'))
+        except ValueError:return self.send(400,{'error':'请求大小无效'})
+        if not 0<size<65536:return self.send(413,{'error':'请求大小无效'})
+        raw=self.rfile.read(size)
+        if self.headers.get('Host')!=HOST or self.headers.get('Origin')!='http://'+HOST or self.headers.get('X-Selection-Token')!=token():return self.send(403,{'error':'页面验证已失效，请刷新'})
+        try:
+            req=json.loads(raw)
+            if not isinstance(req,dict):raise ValueError('请求内容无效')
+            if self.path=='/api/stop':
+                STOP.set()
+                with LOCK:
+                    j=job()
+                    if j and j['status']=='running':j['status']='stopping';write('unfollow-job.json',j)
+                return self.send(200,{'ok':True})
+            with LOCK:
+                if active() or CONNECTING:raise ValueError('正在处理，请先停止并等待当前账号复核完成')
+                if self.path=='/api/connect':CONNECTING=True
+            if self.path=='/api/connect':
+                try:return self.send(200,connect())
+                finally:CONNECTING=False
+            if self.path=='/api/disconnect':
+                with LOCK:
+                    if active() or CONNECTING:raise ValueError('请等待当前操作完成')
+                    MANAGER.stop();CURRENT=None
+                return self.send(200,{'ok':True})
+            if self.path=='/api/shutdown':
+                with LOCK:
+                    if active() or CONNECTING:raise ValueError('请先停止并等待当前操作完成')
+                self.send(200,{'ok':True});threading.Thread(target=shutdown,daemon=True).start();return
+            with LOCK:
+                if active() or CONNECTING:raise ValueError('正在处理，请等待当前操作完成')
+                bind_request(req)
+                prune_history(path('live-accounts-probe.json').parent)
+                if self.path=='/api/whitelist':
+                    ids=req.get('ids');ids_checked(ids);write('whitelist.json',{'ids':ids,'updated_at':now()})
+                    plan=read('selected-accounts.json')
+                    if plan:plan.update(consumed=True);write('selected-accounts.json',plan)
+                    return self.send(200,{'ids':ids})
+                if self.path=='/api/selection':
+                    ids=req.get('ids');known=ids_checked(ids)
+                    if not ids or set(ids)&set(white()):raise ValueError('清单为空或包含白名单账号')
+                    plan={**{k:CURRENT[k] for k in ('profile_key','session_key')},'plan_id':uuid.uuid4().hex,'selected_accounts':[known[i] for i in ids],'count':len(ids),'source_captured_at':data()['capturedAt'],'created_at':now(),'consumed':False}
+                    write('selected-accounts.json',plan);return self.send(200,plan)
+                if self.path=='/api/refollow':
+                    account_id=req.get('id');known=ids_checked([account_id]);a=known[account_id]
+                    if not (a.get('was_unfollowed') or a.get('subscribed') is False):raise ValueError('该账号没有本机取关记录')
+                    ensure_ready()
+                    j={'id':uuid.uuid4().hex,'kind':'follow','protect_after':req.get('protect_after') is True,'profile_key':CURRENT['profile_key'],'session_key':CURRENT['session_key'],'status':'running','started_at':now(),'items':[{**a,'status':'queued'}]}
+                    launch_job(j);return self.send(200,j)
+                if self.path=='/api/execute':
+                    plan=read('selected-accounts.json')
+                    if not plan or req.get('plan_id')!=plan['plan_id'] or plan.get('consumed'):raise ValueError('清单已变化或已执行，请重新生成')
+                    if plan.get('session_key')!=CURRENT['session_key']:raise ValueError('清单属于旧会话，请重新选择')
+                    ids=[a['id'] for a in plan['selected_accounts']];ids_checked(ids)
+                    if not ids or set(ids)&set(white()):raise ValueError('清单为空或包含白名单账号')
+                    ensure_ready()
+                    j={'id':uuid.uuid4().hex,'plan_id':plan['plan_id'],'profile_key':CURRENT['profile_key'],'session_key':CURRENT['session_key'],'status':'running','started_at':now(),'items':[{**a,'status':'queued'} for a in plan['selected_accounts']]}
+                    plan['consumed']=True;write('selected-accounts.json',plan);launch_job(j);return self.send(200,j)
+                if self.path=='/api/resume':
+                    j=job()
+                    if not j or req.get('job_id')!=j['id'] or j['status'] not in ('paused','stopped'):raise ValueError('没有可继续的队列')
+                    if j.get('profile_key')!=CURRENT['profile_key'] or j.get('session_key')!=CURRENT['session_key']:raise ValueError('登录会话已变化，请重新选择未完成账号')
+                    pending=[a['id'] for a in j['items'] if a['status'] not in ('unfollowed','already_unfollowed','followed','already_followed')];ids_checked(pending)
+                    if j.get('kind')!='follow' and set(pending)&set(white()):raise ValueError('未完成项包含白名单账号')
+                    ensure_ready();j.update(status='running',message='正在核实并继续未完成项。',resumed_at=now());launch_job(j);return self.send(200,j)
+            return self.send(404,{'error':'not found'})
+        except (ValueError,TypeError,RuntimeError) as e:return self.send(409,{'error':str(e)})
+        except Exception:return self.send(500,{'error':'服务处理失败，操作已停止'})
+
+def shutdown():
+    CLOSING.set();STOP.set()
+    for _ in range(700):
+        if not CONNECTING:break
+        time.sleep(.1)
+    if WORKER and WORKER.is_alive():WORKER.join(timeout=125)
+    MANAGER.stop();os._exit(0)
+
+if __name__=='__main__':
+    if '--identity' in sys.argv:
+        try:print(json.dumps(runtime_guard.identity()))
+        except Exception as e:print(json.dumps({'error':str(e)}));sys.exit(1)
+        sys.exit(0)
+    if '--environment' in sys.argv:
+        import environment_ops,argparse
+        parser=argparse.ArgumentParser();parser.add_argument('--environment',choices=['prepare','apply','restore'],required=True);parser.add_argument('--data',required=True);parser.add_argument('--resources',required=True);args=parser.parse_args()
+        try:
+            r=environment_ops.prepare(Path(args.resources),Path(args.data)) if args.environment=='prepare' else environment_ops.modify(Path(args.resources),Path(args.data),args.environment)
+            print(json.dumps(r,ensure_ascii=False))
+        except Exception as e:print(json.dumps({'error':str(e)},ensure_ascii=False));sys.exit(1)
+        sys.exit(0)
+    os.umask(0o077);DATA.mkdir(parents=True,exist_ok=True,mode=0o700);token()
+    for folder in (DATA/'accounts').glob('*'):
+        if folder.is_dir():prune_history(folder)
+    CHECKS=preflight()
+    # Show only the saved records belonging to the currently identifiable WeChat account.
+    try:
+        saved_identity=runtime_guard.identity()
+        if (DATA/'accounts'/saved_identity['profile_key']/'live-accounts-probe.json').exists():
+            CURRENT=saved_identity
+            previous_job=job()
+            if previous_job and previous_job['status'] in ('running','stopping'):
+                previous_job.update(status='paused',message='上次操作中断。连接后将先核对关注状态。');write('unfollow-job.json',previous_job)
+    except Exception:CURRENT=None
+    for sig in (signal.SIGTERM,signal.SIGINT):signal.signal(sig,lambda *_:threading.Thread(target=shutdown,daemon=True).start())
+    server=ThreadingHTTPServer(('127.0.0.1',8876),Handler)
+    print('READY http://'+HOST,flush=True);server.serve_forever()

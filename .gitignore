@@ -1,0 +1,9 @@
+.runtime/
+__pycache__/
+.build-env/
+.build-freeze/
+.build-freeze.log
+.package/
+dist/
+macapp/.build/
+__pycache__/

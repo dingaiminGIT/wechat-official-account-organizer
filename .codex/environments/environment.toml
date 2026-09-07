@@ -1,0 +1,8 @@
+version = 1
+name = "wechat-unfollow-app"
+[setup]
+script = ""
+[[actions]]
+name = "Run"
+icon = "run"
+command = "./script/build_and_run.sh"

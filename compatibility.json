@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "adapter": "wmpf-macos-269136-v1",
+  "upstream_commit": "1d9f6e03a24dcd39baa223e25a883a85b84bd303",
+  "architecture": "arm64",
+  "tested_macos": ["26.6.2"],
+  "wechat_version": "4.1.11",
+  "wmpf_build": "269136",
+  "framework_sha256": "8377be3eae0fb8a93bafc0770e80ceecfae75c58e061215f822bd05e89b82754",
+  "original_helper_sha256": "2834eb4e311f9e8f9ad057dad5d10b387e8924aed87c97d9616d31093613f234"
+}
