@@ -28,8 +28,8 @@ Tencent or WeChat are claimed.
 - Python 3.13.1 — Python Software Foundation License and historical notices.
 - PyInstaller 6.22.2 bootloader — GPL-2.0-or-later with the PyInstaller
   bootloader exception, plus the notices contained in its COPYING file.
-- `protobufjs` — BSD 3-Clause License.
-- `ws` — MIT License.
+- `protobufjs` 7.6.6 — BSD 3-Clause License.
+- `ws` 8.21.3 — MIT License.
 
 This file is informational and does not replace the license texts. Each
 component remains governed by its own license.
