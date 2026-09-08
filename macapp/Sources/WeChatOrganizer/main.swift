@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
+        if let iconURL=Bundle.main.url(forResource:"AppIcon",withExtension:"icns"),let icon=NSImage(contentsOf:iconURL) {NSApp.applicationIconImage=icon}
         let menu = NSMenu(), appItem = NSMenuItem();menu.addItem(appItem)
         let appMenu = NSMenu();appItem.submenu=appMenu
         appMenu.addItem(withTitle: "关于公众号整理", action: #selector(about), keyEquivalent: "")
