@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var quitting = false
     var ready = false
     var startupText = ""
+    var miniappTask: Task<Void, Never>?
     let baseURL = URL(string: "http://127.0.0.1:8876/")!
     var resources: URL { Bundle.main.resourceURL!.appendingPathComponent("bridge") }
     var data: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("com.baiya.WeChatOrganizer") }
@@ -63,13 +64,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             try process.run()
         } catch {showStatus("无法启动内置服务",error.localizedDescription)}
     }
-    @objc func reload(){if ready{web.load(URLRequest(url:baseURL))}}
+    @objc func reload(){miniappTask?.cancel();if ready{web.load(URLRequest(url:baseURL))}}
     @objc func about(){let a=NSAlert();a.messageText="公众号整理 · 本机内测版";a.informativeText="使用固定版本 WMPFDebugger（GPLv2）及 Frida。仅在经过验证的微信环境中运行。数据保存在本机，未知版本暂停接入。\n上游：https://github.com/evi0s/WMPFDebugger\n完整源码及许可位于应用 Resources/Source。";a.runModal()}
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool {true}
     func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply {
         guard let process=server,process.isRunning else{return .terminateNow}
         if quitting{return .terminateLater}
         quitting=true
+        miniappTask?.cancel()
         showStatus("正在安全退出", "当前账号如已开始处理，将等待复核完成；后续账号不会继续执行。")
         process.terminate() // Service handles SIGTERM: stop queue, finish current item, detach its debugger.
         return .terminateLater
@@ -80,8 +82,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
     func userContentController(_ userContentController:WKUserContentController,didReceive message:WKScriptMessage){
         if message.name=="miniapp" {
-            guard message.frameInfo.isMainFrame, message.frameInfo.request.url?.host=="127.0.0.1",message.frameInfo.request.url?.port==8876 else{return}
-            Task { _ = await attemptOpenRecentMiniapp() }
+            guard message.frameInfo.isMainFrame, message.frameInfo.request.url?.scheme=="http",message.frameInfo.request.url?.host=="127.0.0.1",message.frameInfo.request.url?.port==8876,
+                  let body=message.body as? [String:Any],let action=body["action"] as? String else{return}
+            if action=="cancel" {miniappTask?.cancel();return}
+            if action=="permission" {
+                _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String:true] as CFDictionary)
+                NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                return
+            }
+            guard action=="open-recent",let generation=body["generation"] as? Int,miniappTask==nil,!quitting else{return}
+            miniappTask=Task { @MainActor in
+                defer {miniappTask=nil}
+                var result="自动准备未完成，请在微信打开任意小程序。"
+                do {
+                    let (bytes,response)=try await URLSession.shared.data(from:baseURL.appendingPathComponent("api/state"))
+                    let state=try JSONSerialization.jsonObject(with:bytes) as? [String:Any]
+                    let checks=state?["preflight"] as? [String:Any]
+                    let job=state?["job"] as? [String:Any]
+                    guard (response as? HTTPURLResponse)?.statusCode==200,checks?["compatible"] as? Bool==true,checks?["prepared"] as? Bool==true,
+                          state?["connecting"] as? Bool==false,!["running","stopping"].contains(job?["status"] as? String ?? ""),!Task.isCancelled else{return}
+                    result=await attemptOpenRecentMiniapp()
+                } catch { result="无法检查连接状态，自动打开已停止。" }
+                guard !Task.isCancelled,!quitting else{return}
+                let payload=try! JSONSerialization.data(withJSONObject:["generation":generation,"message":result,"needsAccessibility":!AXIsProcessTrusted()])
+                _ = try? await web.evaluateJavaScript("window.miniappPreparationResult?.(\(String(decoding:payload,as:UTF8.self)))")
+            }
             return
         }
         guard message.frameInfo.isMainFrame, message.frameInfo.request.url?.host=="127.0.0.1",message.frameInfo.request.url?.port==8876,let action=message.body as? String,["prepare","restore"].contains(action) else{return}
@@ -101,37 +126,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             throw NSError(domain:"WeChatOrganizer",code:1,userInfo:[NSLocalizedDescriptionKey:result?["error"] as? String ?? "请先停止队列并等待当前账号完成"])
         }
     }
-    func attemptOpenRecentMiniapp() async -> Bool {
-        guard AXIsProcessTrusted(), let app=NSRunningApplication.runningApplications(withBundleIdentifier:"com.tencent.xinWeChat").first else { return false }
-        app.activate(); try? await Task.sleep(nanoseconds:300_000_000)
-        let rows=CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements],kCGNullWindowID) as? [[String:Any]] ?? []
-        guard let main=rows.compactMap({ row -> (CGRect,String)? in
-            guard row[kCGWindowOwnerPID as String] as? Int32 == app.processIdentifier,
-                  let bounds=row[kCGWindowBounds as String] as? [String:Any],
-                  let frame=CGRect(dictionaryRepresentation: bounds as CFDictionary), frame.width > 700, frame.height > 500 else { return nil }
-            return (frame,row[kCGWindowName as String] as? String ?? "")
-        }).first(where: {$0.1 == "微信" || $0.1 == "WeChat"}) else { return false }
-        let before=Set(rows.compactMap {$0[kCGWindowOwnerPID as String] as? Int32 == app.processIdentifier ? $0[kCGWindowNumber as String] as? UInt32 : nil})
-        let source=CGEventSource(stateID:.combinedSessionState)
-        for y in [main.0.minY+225,main.0.minY+240,main.0.minY+255] {
-            let point=CGPoint(x:main.0.minX+30,y:y)
-            CGEvent(mouseEventSource:source,mouseType:.leftMouseDown,mouseCursorPosition:point,mouseButton:.left)?.post(tap:.cgSessionEventTap)
-            usleep(80_000)
-            CGEvent(mouseEventSource:source,mouseType:.leftMouseUp,mouseCursorPosition:point,mouseButton:.left)?.post(tap:.cgSessionEventTap)
-            try? await Task.sleep(nanoseconds:700_000_000)
-            let latest=CGWindowListCopyWindowInfo([.optionOnScreenOnly,.excludeDesktopElements],kCGNullWindowID) as? [[String:Any]] ?? []
-            let opened=latest.contains { row in
-                guard row[kCGWindowOwnerPID as String] as? Int32 == app.processIdentifier,
-                      let id=row[kCGWindowNumber as String] as? UInt32, !before.contains(id) else { return false }
-                let title=row[kCGWindowName as String] as? String ?? ""
-                return title == "微信 (窗口)" || title == "WeChat (Window)"
-            }
-            if opened { return true }
-            let escapeDown=CGEvent(keyboardEventSource:source,virtualKey:53,keyDown:true)
-            let escapeUp=CGEvent(keyboardEventSource:source,virtualKey:53,keyDown:false)
-            escapeDown?.post(tap:.cgSessionEventTap);escapeUp?.post(tap:.cgSessionEventTap)
+    func attemptOpenRecentMiniapp() async -> String {
+        guard AXIsProcessTrusted() else { return "自动打开需要本应用的辅助功能权限；也可直接在微信打开任意小程序。" }
+        guard let app=NSRunningApplication.runningApplications(withBundleIdentifier:"com.tencent.xinWeChat").first else { return "请先打开并登录微信。" }
+        let root=AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(root, 0.4)
+        func value(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+            var result: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element,name as CFString,&result) == .success else { return nil }
+            return result
         }
-        return false
+        func nodes(_ start: AXUIElement) -> [AXUIElement] {
+            var queue=[start], result=[AXUIElement](), index=0
+            let deadline=Date().addingTimeInterval(2)
+            while index<queue.count && index<150 && Date()<deadline {
+                let element=queue[index]; index+=1; result.append(element)
+                queue.append(contentsOf: value(element,kAXChildrenAttribute) as? [AXUIElement] ?? [])
+            }
+            return result
+        }
+        func label(_ element: AXUIElement) -> String {
+            let title=value(element,kAXTitleAttribute) as? String ?? ""
+            return title.isEmpty ? (value(element,kAXDescriptionAttribute) as? String ?? "") : title
+        }
+        func press(_ element: AXUIElement) -> Bool {
+            var pid: pid_t=0
+            guard !Task.isCancelled, !quitting,
+                  AXUIElementGetPid(element,&pid) == .success, pid==app.processIdentifier,
+                  value(element,kAXEnabledAttribute) as? Bool == true,
+                  [kAXButtonRole,kAXMenuItemRole].contains(value(element,kAXRoleAttribute) as? String ?? "") else { return false }
+            return AXUIElementPerformAction(element,kAXPressAction as CFString) == .success
+        }
+        let entries=nodes(root).filter { ["小程序","Mini Programs"].contains(label($0)) }
+        guard entries.count==1, press(entries[0]) else {
+            return "当前微信未提供可识别的小程序入口，自动打开已停止。请打开任意最近使用的小程序，连接会自动继续。"
+        }
+        do { try await Task.sleep(nanoseconds:500_000_000) } catch { return "已取消自动打开。" }
+        let groups=nodes(root).filter { ["最近使用","最近使用的小程序","Recently Used"].contains(label($0)) }
+        guard groups.count==1 else { return "未识别到最近使用列表，请点开其中一个小程序。" }
+        let excluded=["更多","查看全部","搜索","More","Search"]
+        let candidates=nodes(groups[0]).filter {
+            value($0,kAXRoleAttribute) as? String == kAXButtonRole && !label($0).isEmpty && !excluded.contains(label($0))
+        }
+        guard let target=candidates.first, press(target) else { return "最近使用列表没有可自动打开的项目，请打开任意小程序。" }
+        return "已请求打开最近使用的小程序，正在验证调试连接。"
     }
     func shellQuote(_ s:String)->String {"'"+s.replacingOccurrences(of:"'",with:"'\\''")+"'"}
     func appleString(_ s:String)->String {"\""+s.replacingOccurrences(of:"\\",with:"\\\\").replacingOccurrences(of:"\"",with:"\\\"")+"\""}
