@@ -101,6 +101,7 @@ for name in [
 shutil.copytree(root / "macapp/Sources", source / "macapp/Sources")
 shutil.copy2(root / "macapp/Package.swift", source / "macapp/Package.swift")
 shutil.copytree(root / "script", source / "script")
+shutil.copytree(root / "docs", source / "docs")
 shutil.copytree(
     debugger,
     source / "third_party/WMPFDebugger",
