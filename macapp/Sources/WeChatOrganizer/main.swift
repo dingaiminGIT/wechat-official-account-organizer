@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let menu = NSMenu(), appItem = NSMenuItem();menu.addItem(appItem)
         let appMenu = NSMenu();appItem.submenu=appMenu
         appMenu.addItem(withTitle: "关于公众号整理", action: #selector(about), keyEquivalent: "")
+        appMenu.addItem(withTitle: "开源许可", action: #selector(openLicenses), keyEquivalent: "")
         appMenu.addItem(withTitle: "重新加载页面", action: #selector(reload), keyEquivalent: "r")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "退出公众号整理", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -64,7 +65,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         } catch {showStatus("无法启动内置服务",error.localizedDescription)}
     }
     @objc func reload(){if ready{web.load(URLRequest(url:baseURL))}}
-    @objc func about(){let a=NSAlert();a.messageText="公众号整理 · 本机内测版";a.informativeText="使用固定版本 WMPFDebugger（GPLv2）及 Frida。仅在经过验证的微信环境中运行。数据保存在本机，未知版本暂停接入。\n上游：https://github.com/evi0s/WMPFDebugger\n完整源码及许可位于应用 Resources/Source。";a.runModal()}
+    @objc func about(){let a=NSAlert();a.messageText="公众号整理 · Apple Silicon 版";a.informativeText="自由软件，按 GPL-2.0-only 发布。使用固定版本 WMPFDebugger 及 Frida，仅在经过验证的微信环境中运行。数据保存在本机，未知版本暂停接入。\n\n当前仅支持 Apple Silicon（M1/M2/M3/M4 及后续同架构芯片），不支持 Intel Mac。\n\n上游：https://github.com/evi0s/WMPFDebugger\n完整对应源码与许可位于应用 Resources/Source 和 Resources/Licenses。";a.runModal()}
+    @objc func openLicenses(){
+        let url=Bundle.main.resourceURL!.appendingPathComponent("Licenses")
+        NSWorkspace.shared.open(url)
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool {true}
     func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply {
         guard let process=server,process.isRunning else{return .terminateNow}

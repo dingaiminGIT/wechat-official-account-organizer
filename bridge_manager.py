@@ -21,7 +21,7 @@ class BridgeManager:
                 if sock.connect_ex(('127.0.0.1',port))==0:raise RuntimeError('检测到其他连接服务占用端口，请先关闭旧版工具')
         self.data.mkdir(parents=True,exist_ok=True,mode=0o700)
         t=self.data/'bridge-token.json';t.write_text(json.dumps({'token':secrets.token_urlsafe(32)}));t.chmod(0o600)
-        debugger=Path(os.environ.get('WECHAT_DEBUGGER',str(self.root.parent/'work/wechat-unfollow-feasibility/research/WMPFDebugger')))
+        debugger=Path(os.environ.get('WECHAT_DEBUGGER',str(self.root/'third_party/WMPFDebugger')))
         log=self.data/'bridge.log'
         self.log=log.open('w');log.chmod(0o600)
         self.process=subprocess.Popen([self.node(),str(debugger/'build/index.js')],cwd=debugger,env=self.environment(),stdout=self.log,stderr=self.log,start_new_session=True)

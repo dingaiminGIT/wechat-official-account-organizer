@@ -4,6 +4,14 @@ cd "$(dirname "$0")/.."
 mode="${1:---run}"
 case "$mode" in --run|--build-only|--verify|--debug|--logs) ;; *) exit 2;; esac
 project="$PWD"
+if [[ "$(uname -m)" != "arm64" ]]; then
+  echo '公众号整理当前仅支持 Apple Silicon（arm64）构建'
+  exit 1
+fi
+if [[ ! -x third_party/WMPFDebugger/node_modules/.bin/tsc ]]; then
+  echo '缺少 WMPFDebugger 依赖，请先运行：npm ci --prefix third_party/WMPFDebugger'
+  exit 1
+fi
 if pgrep -x WeChatOrganizer >/dev/null; then
   osascript -e 'tell application id "com.baiya.WeChatOrganizer" to quit'
   for ((attempt=0;attempt<130;attempt++)); do pgrep -x WeChatOrganizer >/dev/null || break; sleep 1; done
