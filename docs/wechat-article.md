@@ -62,8 +62,8 @@ AI 编程对我最大的意义，也正在这里。不是凭空想一个大产�
 
 [wechat-official-account-organizer](https://github.com/dingaiminGIT/wechat-official-account-organizer)
 
-[直接下载 Apple Silicon 版](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.0/WeChatOrganizer-v0.3.0-apple-silicon.zip)
+[直接下载 Apple Silicon 版 DMG](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.0/WeChatOrganizer-v0.3.0-apple-silicon.dmg)
 
-最后补两句使用边界：底层依赖 WMPFDebugger，所以项目按 GPLv2 开源；目前只支持 Apple Silicon Mac，GitHub 已提供可以直接下载的 ZIP。因为安装包还没有经过 Apple 签名和公证，首次启动需要按住 Control 键点击应用并选择“打开”。正式使用前，还是建议先拿一两个不重要的账号试验。
+最后补两句使用边界：底层依赖 WMPFDebugger，所以项目按 GPLv2 开源；目前只支持 Apple Silicon Mac，GitHub 已提供可以直接下载的 DMG。因为安装包还没有经过 Apple 签名和公证，首次启动需要按住 Control 键点击应用并选择“打开”。正式使用前，还是建议先拿一两个不重要的账号试验。
 
 至于以后会不会收费、会不会做成正式产品，我先不急着回答。对我来说，它已经完成了第一件事：下一次整理公众号时，我不用再手动点两百遍了。
