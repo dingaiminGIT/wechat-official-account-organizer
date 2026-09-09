@@ -44,7 +44,7 @@ AI 编程最适合干这种事。一个念头未必值得组团队、画商业�
 4. 点击「生成取关清单」。这一步只生成名单，不会立刻动微信，给自己最后一次检查机会。
 5. 确认后选择执行模式再开始：超稳妥模式逐个执行并在前后核验；快速模式逐个发送但省略前后状态查询；超级快速模式最多同时发送 3 个请求。
 
-![批量取关公众号 6 秒真实执行演示（燃向配乐版）](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.0/wechat-organizer-6s-demo-energetic.mp4)
+[▶ 播放 6 秒真实执行演示（燃向配乐版）](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.0/wechat-organizer-6s-demo-energetic.mp4)
 
 ![批量取关公众号：185 个账号全部取关并复核完成](https://img.baiyalab.com/i/2026/09/e55de8968cd7b78640f6-88a682e1.png)
 
