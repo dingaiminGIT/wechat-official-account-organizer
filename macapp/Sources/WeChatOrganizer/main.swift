@@ -19,11 +19,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if let iconURL=Bundle.main.url(forResource:"AppIcon",withExtension:"icns"),let icon=NSImage(contentsOf:iconURL) {NSApp.applicationIconImage=icon}
         let menu = NSMenu(), appItem = NSMenuItem();menu.addItem(appItem)
         let appMenu = NSMenu();appItem.submenu=appMenu
-        appMenu.addItem(withTitle: "关于公众号整理", action: #selector(about), keyEquivalent: "")
+        appMenu.addItem(withTitle: "关于批量取关公众号", action: #selector(about), keyEquivalent: "")
         appMenu.addItem(withTitle: "开源许可", action: #selector(openLicenses), keyEquivalent: "")
         appMenu.addItem(withTitle: "重新加载页面", action: #selector(reload), keyEquivalent: "r")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "退出公众号整理", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "退出批量取关公众号", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let editItem=NSMenuItem();menu.addItem(editItem);let edit=NSMenu(title:"编辑");editItem.submenu=edit
         edit.addItem(withTitle:"拷贝",action:#selector(NSText.copy(_:)),keyEquivalent:"c")
         edit.addItem(withTitle:"粘贴",action:#selector(NSText.paste(_:)),keyEquivalent:"v")
@@ -32,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let config=WKWebViewConfiguration();config.userContentController.add(self,name:"environment")
         web=WKWebView(frame:.zero,configuration:config);web.navigationDelegate=self
         window=NSWindow(contentRect:NSRect(x:0,y:0,width:1150,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-        window.title="公众号整理";window.minSize=NSSize(width:760,height:620);window.contentView=web;window.center();window.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
+        window.title="批量取关公众号";window.minSize=NSSize(width:760,height:620);window.contentView=web;window.center();window.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
         showStatus("正在启动", "正在检查本机环境并启动内置服务。")
         startServer()
     }
@@ -65,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         } catch {showStatus("无法启动内置服务",error.localizedDescription)}
     }
     @objc func reload(){if ready{web.load(URLRequest(url:baseURL))}}
-    @objc func about(){let a=NSAlert();a.messageText="公众号整理 · Apple Silicon 版";a.informativeText="自由软件，按 GPL-2.0-only 发布。使用固定版本 WMPFDebugger 及 Frida，仅在经过验证的微信环境中运行。数据保存在本机，未知版本暂停接入。\n\n当前仅支持 Apple Silicon（M1/M2/M3/M4 及后续同架构芯片），不支持 Intel Mac。\n\n上游：https://github.com/evi0s/WMPFDebugger\n完整对应源码与许可位于应用 Resources/Source 和 Resources/Licenses。";a.runModal()}
+    @objc func about(){let a=NSAlert();a.messageText="批量取关公众号 · Apple Silicon 版";a.informativeText="自由软件，按 GPL-2.0-only 发布。使用固定版本 WMPFDebugger 及 Frida，仅在经过验证的微信环境中运行。数据保存在本机，未知版本暂停接入。\n\n当前仅支持 Apple Silicon（M1/M2/M3/M4 及后续同架构芯片），不支持 Intel Mac。\n\n上游：https://github.com/evi0s/WMPFDebugger\n完整对应源码与许可位于应用 Resources/Source 和 Resources/Licenses。";a.runModal()}
     @objc func openLicenses(){
         let url=Bundle.main.resourceURL!.appendingPathComponent("Licenses")
         NSWorkspace.shared.open(url)

@@ -12,7 +12,7 @@ expected_node_version = "23.6.0"
 expected_debugger_commit = "1d9f6e03a24dcd39baa223e25a883a85b84bd303"
 
 if platform.machine() != "arm64":
-    raise SystemExit("公众号整理当前仅支持 Apple Silicon（arm64）构建")
+    raise SystemExit("批量取关公众号当前仅支持 Apple Silicon（arm64）构建")
 if not (debugger / "node_modules/.bin/tsc").exists():
     raise SystemExit("缺少 WMPFDebugger 依赖；请先在 third_party/WMPFDebugger 中运行 npm install")
 
@@ -43,7 +43,7 @@ subprocess.run(
 )
 shutil.copytree(debugger / "src/third-party", debugger / "build/third-party", dirs_exist_ok=True)
 
-bundle = root / "dist/公众号整理.app"
+bundle = root / "dist/批量取关公众号.app"
 stage = root / "dist/.Organizer-stage.app"
 if stage.exists():
     shutil.rmtree(stage)
@@ -112,7 +112,7 @@ shutil.copy2(root / "LICENSE", resources / "LICENSE.txt")
 shutil.copy2(root / "THIRD_PARTY_NOTICES.md", resources / "THIRD_PARTY_NOTICES.md")
 
 notice = (
-    "公众号整理 is free software distributed under GPL-2.0-only.\n"
+    "批量取关公众号 is free software distributed under GPL-2.0-only.\n"
     "WMPFDebugger by evi0s and contributors; GPL-2.0-only.\n"
     "https://github.com/evi0s/WMPFDebugger\n"
     f"Pinned commit: {expected_debugger_commit}\n"
@@ -126,8 +126,8 @@ notice = (
 plist = {
     "CFBundleExecutable": "WeChatOrganizer",
     "CFBundleIdentifier": "com.baiya.WeChatOrganizer",
-    "CFBundleName": "公众号整理",
-    "CFBundleDisplayName": "公众号整理",
+    "CFBundleName": "批量取关公众号",
+    "CFBundleDisplayName": "批量取关公众号",
     "CFBundlePackageType": "APPL",
     "CFBundleVersion": "1",
     "CFBundleShortVersionString": "0.3.0",

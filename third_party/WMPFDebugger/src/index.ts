@@ -1,5 +1,5 @@
 /*
- * Modified for 公众号整理 from WMPFDebugger commit
+ * Modified for 批量取关公众号 from WMPFDebugger commit
  * 1d9f6e03a24dcd39baa223e25a883a85b84bd303.
  * Local changes bind both relays to loopback, authenticate the CDP relay,
  * expose connection health, and shut down cleanly on SIGINT/SIGTERM.

@@ -1,4 +1,4 @@
-# 公众号批量取关
+# 批量取关公众号
 
 一个在 Mac 本机整理微信公众号关注列表的自由软件。它可以读取当前微信账号的公众号列表，按名称或账号 ID 搜索，批量选择、维护白名单、生成取关清单，并在再次确认后逐个执行和复核。最近 30 天的取关记录可以用来恢复关注。
 
@@ -10,7 +10,7 @@
 
 [下载 v0.3.0 DMG（Apple Silicon）](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.0/WeChatOrganizer-v0.3.0-apple-silicon.dmg)
 
-打开 DMG 后，把「公众号整理.app」拖入“应用程序”。当前版本采用 ad-hoc 签名，尚未经过 Apple 公证；首次启动请按住 Control 键点击应用，选择“打开”。如果仍被拦截，请到“系统设置 → 隐私与安全性”中确认打开。不要下载来源不明的转载包。
+打开 DMG 后，把「批量取关公众号.app」拖入“应用程序”。当前版本采用 ad-hoc 签名，尚未经过 Apple 公证。第一次打开时，请在 Finder 的“应用程序”文件夹里右键点击「批量取关公众号.app」，然后选择“打开”。如果仍被拦截，请到“系统设置 → 隐私与安全性”中确认打开。不要下载来源不明的转载包。
 
 [备用 ZIP 下载](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.0/WeChatOrganizer-v0.3.0-apple-silicon.zip)
 
@@ -55,7 +55,7 @@ npm ci --prefix third_party/WMPFDebugger
 python3 -m unittest -v test_guards.py test_selection.py
 ```
 
-构建结果位于 `dist/公众号整理.app`。当前使用 ad-hoc 签名，尚未完成 Developer ID 签名与 Apple 公证。应用包内的 `Contents/Resources/Source` 保存与该二进制对应的完整源码，`Contents/Resources/Licenses` 保存第三方许可证。
+构建结果位于 `dist/批量取关公众号.app`。当前使用 ad-hoc 签名，尚未完成 Developer ID 签名与 Apple 公证。应用包内的 `Contents/Resources/Source` 保存与该二进制对应的完整源码，`Contents/Resources/Licenses` 保存第三方许可证。
 
 ## 支持范围与升级策略
 

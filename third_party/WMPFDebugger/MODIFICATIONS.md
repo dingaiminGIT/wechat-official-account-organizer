@@ -4,7 +4,7 @@ This directory is based on
 [WMPFDebugger](https://github.com/evi0s/WMPFDebugger) commit
 `1d9f6e03a24dcd39baa223e25a883a85b84bd303`.
 
-`src/index.ts` is modified by the 公众号整理 project to:
+`src/index.ts` is modified by the 批量取关公众号 project to:
 
 - bind the mini-program and CDP WebSocket servers to `127.0.0.1`;
 - require the per-run local bridge token for CDP clients and reject browser origins;

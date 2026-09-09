@@ -1,6 +1,6 @@
 # Third-party notices
 
-公众号整理 contains or bundles the following third-party software. The full
+批量取关公众号 contains or bundles the following third-party software. The full
 license texts are kept in [`Licenses/`](Licenses/), and are also copied into
 the built application's `Contents/Resources/Licenses` directory.
 
