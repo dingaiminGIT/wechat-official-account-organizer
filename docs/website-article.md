@@ -66,6 +66,8 @@ AI 编程最适合干这种事。一个念头未必值得组团队、画商业�
 
 涉及批量操作，我给执行流程设了几道刹车：清单绑定当前微信账号与会话；每次只执行一个；执行后立即复核；超时或结果不确定就暂停；继续前先检查刚才那项是否已经成功，避免重复取关。
 
-源码已经放在 [GitHub](https://github.com/dingaiminGIT/wechat-official-account-organizer)。因为项目包含 GPLv2 的 WMPFDebugger，整个仓库也按 GPLv2 开源：你可以查看、修改和自己构建；如果分发修改版，需要继续提供对应源码并保留许可证。当前只验证了 Apple Silicon Mac，也还没有签名、公证好的安装包，因此更适合愿意自己构建和试用的同学。
+[下载 Apple Silicon 版 ZIP](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.0/WeChatOrganizer-v0.3.0-apple-silicon.zip) · [查看源代码](https://github.com/dingaiminGIT/wechat-official-account-organizer)
+
+因为项目包含 GPLv2 的 WMPFDebugger，整个仓库也按 GPLv2 开源；如果分发修改版，需要继续提供对应源码并保留许可证。当前版本还没有经过 Apple 签名和公证，首次启动需要按住 Control 键点击应用并选择“打开”。
 
 如果你也有一个堆了几百个公众号的微信，可以先从一两个不重要的账号试起。至于它以后会不会变成一个“正式产品”，我还没想那么远。我先关心的是：下一次想整理公众号时，我终于不用再点两百遍了。
