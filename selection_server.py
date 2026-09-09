@@ -330,10 +330,14 @@ class Handler(BaseHTTPRequestHandler):
                     plan={**{k:CURRENT[k] for k in ('profile_key','session_key')},'plan_id':uuid.uuid4().hex,'selected_accounts':[known[i] for i in ids],'count':len(ids),'source_captured_at':data()['capturedAt'],'created_at':now(),'consumed':False}
                     write('selected-accounts.json',plan);return self.send(200,plan)
                 if self.path=='/api/refollow':
-                    account_id=req.get('id');known=ids_checked([account_id]);a=known[account_id]
-                    if not (a.get('was_unfollowed') or a.get('subscribed') is False):raise ValueError('该账号没有本机取关记录')
+                    ids=req.get('ids') if 'ids' in req else [req.get('id')]
+                    known=ids_checked(ids)
+                    if not ids:raise ValueError('请先选择要重新关注的账号')
+                    if any(not (known[i].get('was_unfollowed') or known[i].get('subscribed') is False) for i in ids):raise ValueError('所选账号中包含没有本机取关记录的账号')
+                    protect_after=req.get('protect_after',False)
+                    if not isinstance(protect_after,bool):raise ValueError('请选择是否加入白名单')
                     ensure_ready()
-                    j={'id':uuid.uuid4().hex,'kind':'follow','mode':'safe','protect_after':req.get('protect_after') is True,'profile_key':CURRENT['profile_key'],'session_key':CURRENT['session_key'],'status':'running','started_at':now(),'items':[{**a,'status':'queued'}]}
+                    j={'id':uuid.uuid4().hex,'kind':'follow','mode':'safe','protect_after':protect_after,'profile_key':CURRENT['profile_key'],'session_key':CURRENT['session_key'],'status':'running','started_at':now(),'items':[{**known[i],'status':'queued'} for i in ids]}
                     launch_job(j);return self.send(200,j)
                 if self.path=='/api/execute':
                     mode=req.get('mode','safe')

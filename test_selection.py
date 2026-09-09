@@ -113,6 +113,44 @@ class SafetyTests(unittest.TestCase):
   with patch.object(m.MANAGER,'call',side_effect=RuntimeError('uncertain')):
    self.assertEqual(self.post('/api/refollow',{'id':'a','protect_after':True})[0],200);self.wait()
    self.assertEqual(m.job()['status'],'paused');self.assertFalse(m.data()['accounts'][0]['subscribed']);self.assertNotIn('a',m.white());self.assertIsNone(m.read('account-history.json'))
+ def restore_fixture(self):
+  catalog=m.data()
+  for a in catalog['accounts']:a.update(subscribed=False,was_unfollowed=True,unfollowed_at=m.now())
+  m.write('live-accounts-probe.json',catalog)
+ def test_batch_refollow_defaults_to_no_new_whitelist_and_can_unfollow_again(self):
+  self.restore_fixture()
+  with patch.object(m.MANAGER,'call',return_value={'status':'followed','subscribed':True}) as follow:
+   self.assertEqual(self.post('/api/refollow',{'ids':['a','b','w']})[0],200);self.wait()
+   self.assertEqual([call.args[2] for call in follow.call_args_list],['a','b','w'])
+  self.assertEqual(m.job()['status'],'completed');self.assertEqual(m.white(),['w'])
+  self.assertTrue(all(a['subscribed'] for a in m.data()['accounts']))
+  p=self.plan(['a','b'])
+  with patch.object(m,'fast_action',return_value={'status':'unfollowed_unverified','subscribed':False,'verified':False}) as fast:
+   self.assertEqual(self.post('/api/execute',{'plan_id':p['plan_id'],'mode':'fast'})[0],200);self.wait()
+   self.assertEqual(fast.call_count,2)
+ def test_batch_refollow_protection_is_opt_in(self):
+  self.restore_fixture()
+  with patch.object(m.MANAGER,'call',return_value={'status':'followed','subscribed':True}):
+   self.assertEqual(self.post('/api/refollow',{'ids':['a','b'],'protect_after':True})[0],200);self.wait()
+  self.assertEqual(set(m.white()),{'a','b','w'})
+ def test_batch_refollow_validates_entire_selection_before_starting(self):
+  self.restore_fixture();catalog=m.data();catalog['accounts'][1]={'id':'b','name':'b'};m.write('live-accounts-probe.json',catalog)
+  with patch.object(m.MANAGER,'call') as follow:
+   for ids in [[],['a','a'],['a','unknown'],['a','b'],'a',None]:
+    self.assertEqual(self.post('/api/refollow',{'ids':ids})[0],409)
+   self.assertEqual(self.post('/api/refollow',{'ids':['a'],'protect_after':'false'})[0],409)
+   self.assertEqual(self.post('/api/refollow',{'ids':['a']},identity={'profile_key':'old','session_key':'old'})[0],409)
+   follow.assert_not_called();self.assertIsNone(m.job())
+ def test_batch_refollow_pauses_and_resumes_only_unfinished_items(self):
+  self.restore_fixture()
+  with patch.object(m.MANAGER,'call',side_effect=[{'status':'followed','subscribed':True},RuntimeError('uncertain')]) as follow:
+   self.assertEqual(self.post('/api/refollow',{'ids':['a','b','w']})[0],200);self.wait()
+   self.assertEqual(follow.call_count,2)
+  self.assertEqual(m.job()['status'],'paused');self.assertEqual([i['status'] for i in m.job()['items']],['followed','uncertain','queued']);self.assertEqual(m.white(),['w'])
+  with patch.object(m.MANAGER,'call',return_value={'status':'followed','subscribed':True}) as follow:
+   self.assertEqual(self.post('/api/resume',{'job_id':m.job()['id']})[0],200);self.wait()
+   self.assertEqual([call.args[2] for call in follow.call_args_list],['b','w'])
+  self.assertEqual(m.job()['status'],'completed');self.assertEqual(m.white(),['w'])
  def test_retention_expires_records_but_keeps_followed_and_whitelist(self):
   at=m.parsed_date('2026-09-07T12:00:00Z');old=(at-m.datetime.timedelta(days=31)).isoformat();recent=(at-m.datetime.timedelta(days=29)).isoformat()
   m.write('live-accounts-probe.json',{'accounts':[{'id':'a','was_unfollowed':True,'subscribed':False,'unfollowed_at':old},{'id':'b','was_unfollowed':True,'subscribed':True,'unfollowed_at':old},{'id':'w','was_unfollowed':True,'subscribed':False,'unfollowed_at':recent}]})
