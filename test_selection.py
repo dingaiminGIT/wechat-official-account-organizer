@@ -3,7 +3,7 @@ from unittest.mock import patch
 import selection_server as m
 class SafetyTests(unittest.TestCase):
  def setUp(self):
-  self.tmp=tempfile.TemporaryDirectory();m.DATA=pathlib.Path(self.tmp.name);m.ROOT=pathlib.Path(__file__).parent;m.STOP.clear();m.WORKER=None;m.CONNECTING=False
+  self.tmp=tempfile.TemporaryDirectory();m.DATA=pathlib.Path(self.tmp.name);m.ROOT=pathlib.Path(__file__).parent;m.STOP.clear();m.WORKER=None;m.CONNECTING=False;m.MINIAPPS_AT_BRIDGE_START=set()
   self.ident={'profile_key':'a'*64,'session_key':'s'*64,'label':'fixture'};m.CURRENT=self.ident.copy()
   self.idpatch=patch.object(m.runtime_guard,'identity',side_effect=lambda:self.ident.copy());self.idpatch.start()
   self.ready=patch.object(m,'ensure_ready',side_effect=lambda *args,**kwargs:m.verify_identity());self.ready.start()
@@ -42,6 +42,9 @@ class SafetyTests(unittest.TestCase):
   self.assertEqual(self.post('/api/execute',{'plan_id':p['plan_id']},identity=old)[0],409);self.assertEqual(m.snapshot()['catalog']['accounts'],[]);self.assertEqual(self.calls,[])
  def test_accounts_have_separate_whitelists(self):
   m.CURRENT={'profile_key':'b'*64,'session_key':'t'*64};self.assertEqual(m.white(),[]);self.assertEqual(m.data()['accounts'],[]);m.write('whitelist.json',{'ids':['other']});m.CURRENT=self.ident.copy();self.assertEqual(m.white(),['w'])
+ def test_detects_miniapp_opened_before_bridge(self):
+  output=''' 123 /Applications/WeChat.app/Contents/MacOS/WeChat\n 456 /Applications/WeChat.app/Contents/Frameworks/WeChatAppEx Framework.framework/Helpers/WeApp.app/Contents/MacOS/WeApp --wmpf-render-type=1 --wmpf-appid=wxd45abc\n 789 /Applications/WeChat.app/Contents/Frameworks/WeChatAppEx Framework.framework/Helpers/WeApp.app/Contents/MacOS/WeApp --wmpf-render-type=4 --wmpf-appid=preload-13\n'''
+  self.assertEqual(m.open_miniapp_pids(output),{456});m.MINIAPPS_AT_BRIDGE_START={456};self.assertIn('启动前打开',m.miniapp_wait_message())
  def test_unknown_result_pauses_before_next(self):
   m.action.side_effect=RuntimeError('uncertain');p=self.plan(['a','b']);self.post('/api/execute',{'plan_id':p['plan_id']});self.wait()
   self.assertEqual(m.action.call_count,1);self.assertEqual(m.job()['status'],'paused');self.assertEqual(m.job()['items'][1]['status'],'queued')

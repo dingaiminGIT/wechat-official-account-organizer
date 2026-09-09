@@ -71,8 +71,8 @@ function syncConnectionPresentation(){
  if($('connectiondetails'))$('connectiondetails').open=waitingMiniapp||(!connected&&!cached);
  const needsConnection=!!plan&&!plan.consumed&&!connected;
  if(needsConnection){
-  $('planconnect').textContent=waitingMiniapp?'等待打开小程序':connecting?'正在连接微信…':'恢复实时连接，保留清单';
-  $('executiongate').textContent=waitingMiniapp?'正在恢复实时连接。请点开一个小程序的内容页面；当前清单不会丢失。':cached?'当前展示的是本机缓存列表。清单已保留；执行取关前请恢复实时连接。':'尚未连接微信，暂不能取关。';
+ $('planconnect').textContent=waitingMiniapp?'等待重新打开小程序':connecting?'正在连接微信…':'恢复实时连接，保留清单';
+ $('executiongate').textContent=waitingMiniapp?'正在恢复实时连接。如果小程序已经打开，请关闭窗口后重新打开；当前清单不会丢失。':cached?'当前展示的是本机缓存列表。清单已保留；执行取关前请恢复实时连接。':'尚未连接微信，暂不能取关。';
   $('execute').title=$('executiongate').textContent;
  }
  if(cached&&!waitingMiniapp&&$('status').classList.contains('error')&&$('status').textContent.includes('小程序'))message('当前为缓存模式；列表和清单仍保存在本机，执行前需要恢复实时连接。');
@@ -91,7 +91,7 @@ async function connectWeChat(retry=false){
  if(!waitingMiniapp)$('setupmessage').textContent='正在检查环境、核实账号并读取公众号…';
  try{applyState(await api('/api/connect',{}));waitingMiniapp=false;$('cancelconnect').classList.add('hidden');autoAttempts=0;message('微信已连接，清单已保留。核对后点击“开始取关”。')}
  catch(e){message(e.message,true);await refreshJob();
- if(e.message.includes('小程序')&&autoAttempts++<6){waitingMiniapp=true;$('cancelconnect').classList.remove('hidden');$('setupmessage').textContent='等待你打开小程序：请在微信的小程序列表中，再点开任意一个小程序。打开后自动继续，无需重复点击连接。';waitTimer=setTimeout(()=>connectWeChat(true),5000)}
+ if(e.message.includes('小程序')&&autoAttempts++<6){waitingMiniapp=true;$('cancelconnect').classList.remove('hidden');$('setupmessage').textContent=e.message.includes('连接服务启动前')?'检测到小程序打开得太早：请关闭当前小程序窗口，再重新打开任意一个小程序的内容页。打开后会自动继续。':'等待你打开小程序：请在微信的小程序列表中，再点开任意一个小程序。打开后自动继续，无需重复点击连接。';waitTimer=setTimeout(()=>connectWeChat(true),5000)}
   else{waitingMiniapp=false;$('cancelconnect').classList.add('hidden');$('setupmessage').textContent=e.message.includes('小程序')?'等待已结束。点击「开始连接」重试，再关闭并重新打开一个小程序；请保持它的窗口打开。':e.message;message($('setupmessage').textContent,true)}
  }finally{connecting=false;update()}
 }

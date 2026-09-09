@@ -2,13 +2,13 @@
 """Local app service. Account-scoped storage, fail-closed compatibility, serial jobs."""
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
-import datetime,json,os,secrets,signal,sys,threading,time,uuid
+import datetime,json,os,secrets,signal,subprocess,sys,threading,time,uuid
 import runtime_guard
 from bridge_manager import BridgeManager
 ROOT=Path(os.environ.get('WECHAT_RESOURCES',Path(__file__).resolve().parent))
 DATA=Path(os.environ.get('WECHAT_DATA_ROOT',ROOT/'.runtime'))
 HOST='127.0.0.1:8876';LOCK=threading.RLock();STOP=threading.Event()
-CURRENT=None;WORKER=None;CHECKS={};CONNECTING=False;CLOSING=threading.Event()
+CURRENT=None;WORKER=None;CHECKS={};CONNECTING=False;CLOSING=threading.Event();MINIAPPS_AT_BRIDGE_START=set()
 SCOPED={'live-accounts-probe.json','whitelist.json','selected-accounts.json','unfollow-job.json','account-history.json'}
 MANAGER=BridgeManager(ROOT,DATA)
 EMPTY={'accounts':[],'capturedAt':None}
@@ -93,14 +93,31 @@ def ensure_ready(check_identity=True):
     if check_identity:verify_identity()
     if not MANAGER.call('health').get('connected'):raise RuntimeError('微信连接已断开，请保留小程序窗口后重新连接')
 
+def open_miniapp_pids(output=None):
+    """Return real miniapp renderer PIDs, excluding WeChat's preload process."""
+    if output is None:
+        try:output=subprocess.run(['/bin/ps','-axo','pid=,command='],capture_output=True,text=True,timeout=3).stdout
+        except Exception:return set()
+    result=set()
+    for line in output.splitlines():
+        if '/Helpers/WeApp.app/Contents/MacOS/WeApp ' not in line or '--wmpf-appid=' not in line or '--wmpf-appid=preload-' in line:continue
+        try:result.add(int(line.split(None,1)[0]))
+        except (ValueError,IndexError):pass
+    return result
+
+def miniapp_wait_message():
+    if MINIAPPS_AT_BRIDGE_START:
+        return '检测到小程序是在连接服务启动前打开的。请关闭当前小程序窗口，再重新打开任意小程序的内容页。'
+    return '请打开一个微信小程序并保留窗口，然后重新连接'
+
 def connection():
     if not CURRENT:return {'connected':False,'message':'尚未连接微信，请先检查环境并连接'}
     try:
         verify_identity()
         if MANAGER.process is None or MANAGER.process.poll() is not None:raise RuntimeError('连接服务未启动，请重新连接')
         # Native TCP peer count is only a transport indicator, never identity proof.
-        p=__import__('subprocess').run(['/usr/sbin/lsof','-nP','-iTCP:9421','-sTCP:ESTABLISHED','-F','n'],capture_output=True,text=True,timeout=3)
-        if '127.0.0.1:9421->127.0.0.1:' not in p.stdout:raise RuntimeError('请打开微信小程序并保留窗口，然后重新连接')
+        p=subprocess.run(['/usr/sbin/lsof','-nP','-iTCP:9421','-sTCP:ESTABLISHED','-F','n'],capture_output=True,text=True,timeout=3)
+        if '127.0.0.1:9421->127.0.0.1:' not in p.stdout:raise RuntimeError(miniapp_wait_message())
         return {'connected':True,'message':'已连接 · '+CURRENT['label']}
     except Exception as e:
         if active():STOP.set()
@@ -124,14 +141,18 @@ def bind_request(req):
     if req.get('profile_key')!=CURRENT['profile_key'] or req.get('session_key')!=CURRENT['session_key']:raise ValueError('页面账号已过期，请重新连接并选择账号')
 
 def connect():
-    global CURRENT,CHECKS
+    global CURRENT,CHECKS,MINIAPPS_AT_BRIDGE_START
     if CLOSING.is_set():raise RuntimeError('应用正在退出')
     CHECKS=preflight()
     if not CHECKS['compatible']:raise RuntimeError(CHECKS['message'])
     if not CHECKS['prepared']:raise RuntimeError('此微信尚未准备连接环境。请在应用菜单中查看“环境准备与恢复”。')
     identity=runtime_guard.identity()
+    if MANAGER.process is None or MANAGER.process.poll() is not None:MINIAPPS_AT_BRIDGE_START=open_miniapp_pids()
     MANAGER.start()
-    listing=MANAGER.call('list',identity)
+    try:listing=MANAGER.call('list',identity)
+    except RuntimeError as e:
+        if '小程序' in str(e):raise RuntimeError(miniapp_wait_message()) from e
+        raise
     verify_identity(identity)
     if CLOSING.is_set():raise RuntimeError('应用正在退出')
     with LOCK:
@@ -150,6 +171,7 @@ def connect():
     listing['accounts']=list(fresh.values())
     verify_identity(identity)
     with LOCK:
+        MINIAPPS_AT_BRIDGE_START=set()
         write('live-accounts-probe.json',listing)
         if read('whitelist.json') is None:write('whitelist.json',{'ids':[]})
         oldjob=job()
