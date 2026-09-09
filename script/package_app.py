@@ -130,7 +130,7 @@ plist = {
     "CFBundleDisplayName": "批量取关公众号",
     "CFBundlePackageType": "APPL",
     "CFBundleVersion": "1",
-    "CFBundleShortVersionString": "0.4.1",
+    "CFBundleShortVersionString": "0.4.2",
     "LSMinimumSystemVersion": "14.0",
     "LSArchitecturePriority": ["arm64"],
     "NSPrincipalClass": "NSApplication",
