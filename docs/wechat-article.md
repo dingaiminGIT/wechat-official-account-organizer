@@ -62,7 +62,7 @@ AI 编程对我最大的意义，也正在这里。不是凭空想一个大产�
 
 [wechat-official-account-organizer](https://github.com/dingaiminGIT/wechat-official-account-organizer)
 
-[直接下载 Apple Silicon 版 DMG](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.0/WeChatOrganizer-v0.3.0-apple-silicon.dmg)
+[直接下载 Apple Silicon 版 DMG](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.1/WeChatOrganizer-v0.3.1-apple-silicon.dmg)
 
 最后补两句使用边界：底层依赖 WMPFDebugger，所以项目按 GPLv2 开源；目前只支持 Apple Silicon Mac，GitHub 已提供可以直接下载的 DMG。安装包还没有经过 Apple 签名和公证。第一次打开时，请在 Finder 的“应用程序”文件夹里右键点击「批量取关公众号.app」，然后选择“打开”。正式使用前，还是建议先拿一两个不重要的账号试验。
 

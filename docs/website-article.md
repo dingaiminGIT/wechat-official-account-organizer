@@ -66,7 +66,7 @@ AI 编程最适合干这种事。一个念头未必值得组团队、画商业�
 
 涉及批量操作，我给执行流程设了几道刹车：清单绑定当前微信账号与会话；每次只执行一个；执行后立即复核；超时或结果不确定就暂停；继续前先检查刚才那项是否已经成功，避免重复取关。
 
-[下载 Apple Silicon 版 DMG](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.0/WeChatOrganizer-v0.3.0-apple-silicon.dmg) · [查看源代码](https://github.com/dingaiminGIT/wechat-official-account-organizer)
+[下载 Apple Silicon 版 DMG](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.1/WeChatOrganizer-v0.3.1-apple-silicon.dmg) · [查看源代码](https://github.com/dingaiminGIT/wechat-official-account-organizer)
 
 因为项目包含 GPLv2 的 WMPFDebugger，整个仓库也按 GPLv2 开源；如果分发修改版，需要继续提供对应源码并保留许可证。当前版本还没有经过 Apple 签名和公证。第一次打开时，请在 Finder 的“应用程序”文件夹里右键点击「批量取关公众号.app」，然后选择“打开”。
 

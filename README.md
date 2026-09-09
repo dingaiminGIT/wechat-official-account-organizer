@@ -8,11 +8,11 @@
 
 ## 下载
 
-[下载 v0.3.0 DMG（Apple Silicon）](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.0/WeChatOrganizer-v0.3.0-apple-silicon.dmg)
+[下载 v0.3.1 DMG（Apple Silicon）](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.1/WeChatOrganizer-v0.3.1-apple-silicon.dmg)
 
 打开 DMG 后，把「批量取关公众号.app」拖入“应用程序”。当前版本采用 ad-hoc 签名，尚未经过 Apple 公证。第一次打开时，请在 Finder 的“应用程序”文件夹里右键点击「批量取关公众号.app」，然后选择“打开”。如果仍被拦截，请到“系统设置 → 隐私与安全性”中确认打开。不要下载来源不明的转载包。
 
-[备用 ZIP 下载](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.0/WeChatOrganizer-v0.3.0-apple-silicon.zip)
+[备用 ZIP 下载](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.1/WeChatOrganizer-v0.3.1-apple-silicon.zip)
 
 Release 同时提供 `SHA256SUMS.txt`，可以用它核对下载文件是否完整。
 
