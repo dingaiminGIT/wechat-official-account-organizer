@@ -10,7 +10,7 @@ async function evaluate(expression){const r=await call('Runtime.evaluate',{expre
 const guard=String.raw`if(!/^weixin:\/\/resourceid\/Subscription(?:Profile|Disorder)\//.test(location.href)||!window.WeixinJSBridge)return resolve({error:'公众号页面已关闭'});`;
 try{
  const input=JSON.parse(await new Promise(r=>{let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>r(s))}));
- if(!['health','list','check','unfollow','follow'].includes(input.action))throw Error('无效操作');
+ if(!['health','list','check','unfollow','unfollow_request','follow'].includes(input.action))throw Error('无效操作');
  const data=process.env.WECHAT_DATA_ROOT;if(!data)throw Error('执行环境未配置');
  const auth=JSON.parse(await readFile(resolve(data,'bridge-token.json'),'utf8')).token;
  async function identityGuard(){
@@ -41,6 +41,13 @@ try{
    async function allowed(){const w=JSON.parse(await readFile(resolve(profileDir,'whitelist.json'),'utf8'));if(w.ids.includes(input.id))throw Error('账号在白名单中');if(input.id==='gh_b4af18eac3d5')throw Error('该账号仅支持手机端取关')}
    const id=JSON.stringify(input.id);
    async function status(){stage=mutationSent?'verify':'check';return evaluate(`new Promise(resolve=>{${guard}const timer=setTimeout(()=>resolve({error:'关注状态查询超时'}),16000);WeixinJSBridge.invoke('H5ExtTransfer',{cgi_cmdid:5814,url:'/cgi-bin/mmbiz-bin/bizattr/bizprofilev2h5',scope:'subscriptions',webcgi_header:[],cgi_type:0,webcgi_method:1,req_json:JSON.stringify({BizUserName:${id},ActionType:0,PageSize:10,BizSessionID:Math.floor(Date.now()/1000),Scene:207,UsePlainTopic:true,PreLoad:0,FilterPicText:true,BaseRequest:{SessionKey:'',Uin:0,DeviceID:'',ClientVersion:0,DeviceType:'',Scene:0}})},r=>{clearTimeout(timer);try{const d=JSON.parse(r?.jsapi_resp?.resp_json||'{}');if(d.BaseResponse?.Ret!==0||d.AccountInfo?.UserName!==${id}||![0,1,false,true].includes(d.BaseInfo?.IsSubscribed))return resolve({error:'无法核实当前账号关注状态'});resolve({id:d.AccountInfo.UserName,name:d.AccountInfo.NickName||'',subscribed:!!d.BaseInfo.IsSubscribed})}catch{resolve({error:'账号状态解析失败'})}})})`)}
+   if(input.action==='unfollow_request'){
+    await allowed();await identityGuard();stage='unfollow';mutationSent=true;
+    const method='Unsubscribe',params={userName:input.id};
+    const ack=await evaluate(`new Promise(resolve=>{${guard}const timer=setTimeout(()=>resolve({error:'操作回执超时，请稍后统一核实结果'}),16000);WeixinJSBridge.invoke(${JSON.stringify(method)},${JSON.stringify(params)},r=>{clearTimeout(timer);resolve({ack:r?.err_msg||''})})})`);
+    if(ack.ack.toLowerCase()!=='unsubscribe:ok')throw Error('微信未确认操作：'+ack.ack);
+    await identityGuard();console.log(JSON.stringify({id:input.id,status:'unfollowed_unverified',subscribed:false,verified:false,mutation_sent:true,ack:ack.ack}));
+   }else{
    if(input.action==='follow'&&!catalog.accounts.some(a=>a.id===input.id&&(a.was_unfollowed||a.subscribed===false)))throw Error('只能恢复本机取关记录中的账号');
    if(input.action==='unfollow')await allowed();const before=await status();await identityGuard();
    if(input.action==='check')console.log(JSON.stringify(before));
@@ -54,7 +61,7 @@ try{
     let after;for(const delay of [0,350,750,1500,2000]){if(delay)await new Promise(r=>setTimeout(r,delay));await identityGuard();after=await status();if(after.subscribed===restoring)break}
     await identityGuard();if(after.subscribed!==restoring)throw Error('微信返回成功，但关注状态未达到预期，已暂停');
     console.log(JSON.stringify({...after,status:restoring?'followed':'unfollowed',mutation_sent:true,ack:ack.ack}));
-   }
+   }}
   }
  }
 }catch(e){console.log(JSON.stringify({error:e.message,stage,mutation_sent:mutationSent}));process.exitCode=1}

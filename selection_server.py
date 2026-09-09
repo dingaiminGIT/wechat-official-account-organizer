@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Local app service. Account-scoped storage, fail-closed compatibility, serial jobs."""
+"""Local app service. Account-scoped storage and fail-closed job execution."""
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 import datetime,json,os,secrets,signal,subprocess,sys,threading,time,uuid
 import runtime_guard
 from bridge_manager import BridgeManager
@@ -182,58 +183,89 @@ def connect():
             plan.update(consumed=True);write('selected-accounts.json',plan)
     return snapshot()
 
+TERMINAL={'unfollowed','unfollowed_unverified','already_unfollowed','followed','already_followed'}
+MODES={'safe','fast','turbo'}
 def action(account_id):return MANAGER.call('unfollow',CURRENT,account_id)
+def fast_action(account_id):return MANAGER.call('unfollow_request',CURRENT,account_id)
 def record_execution(j,index,started):
     elapsed=max(0,round((time.monotonic()-started)*1000));item=j['items'][index]
     item['execution_ms']=item.get('execution_ms',0)+elapsed;item['execution_finished_at']=now();item.pop('execution_started_at',None);j['execution_ms']=j.get('execution_ms',0)+elapsed
 
-def run_job(job_id):
+def store_result(j,index,result):
+    item=j['items'][index];messages={'unfollowed':'已取关并复核','unfollowed_unverified':'已取关，未复核','already_unfollowed':'已未关注，跳过','followed':'已重新关注并复核','already_followed':'已经关注，已复核'}
+    item.update(status=result['status'],message=messages[result['status']],result=result)
+    catalog=data()
+    for a in catalog['accounts']:
+        if a['id']==item['id']:
+            a.update(subscribed=result['subscribed'],following_verified=result.get('verified',result['status']!='unfollowed_unverified'),was_unfollowed=True)
+            a['refollowed_at' if result['subscribed'] else 'unfollowed_at']=now()
+            if not result['subscribed']:
+                a['history_started_at']=a['unfollowed_at'];a['history_expires_at']=(parsed_date(a['unfollowed_at'])+datetime.timedelta(days=HISTORY_DAYS)).isoformat()
+    write('live-accounts-probe.json',catalog)
+    history=read('account-history.json',[]);history.append({'id':item['id'],'name':item.get('name',''),'action':j.get('kind','unfollow'),'status':result['status'],'verified':result.get('verified',result['status']!='unfollowed_unverified'),'at':now(),'execution_ms':item.get('execution_ms')});write('account-history.json',history)
+    if j.get('kind')=='follow' and j.get('protect_after'):write('whitelist.json',{'ids':list(dict.fromkeys([*white(),item['id']])),'updated_at':now()})
+
+def process_item(job_id,index):
+    started=time.monotonic();invoked=False
     try:
-        for index in range(len(job()['items'])):
-            with LOCK:
-                j=job()
-                if j['id']!=job_id:return
-                if STOP.is_set():break
-                item=j['items'][index]
-                if item['status'] in ('unfollowed','already_unfollowed','followed','already_followed'):continue
-            started=time.monotonic();invoked=False
-            try:
-                ensure_ready(check_identity=False)
-                with LOCK:
-                    if STOP.is_set():break
-                    if j.get('kind')!='follow' and item['id'] in white():raise RuntimeError('账号已在白名单中，执行停止')
-                    j=job();j['items'][index].update(status='running',execution_started_at=now());write('unfollow-job.json',j)
-                started=time.monotonic();invoked=True;result=MANAGER.call('follow',CURRENT,item['id']) if j.get('kind')=='follow' else action(item['id']);verify_identity()
-            except Exception as e:
-                with LOCK:
-                    j=job();detail=getattr(e,'result',{}) if invoked else {'mutation_sent':False,'stage':'preflight'};j['items'][index].update(status='blocked' if detail.get('mutation_sent') is False else 'uncertain',message=str(e),diagnostic=detail)
-                    record_execution(j,index,started);j.update(status='paused',message='已暂停。继续前会重新核对账号和关注状态。',finished_at=now());write('unfollow-job.json',j)
-                return
-            with LOCK:
-                j=job();j['items'][index].update(status=result['status'],message={'unfollowed':'已取关并复核','already_unfollowed':'已未关注，跳过','followed':'已重新关注并复核','already_followed':'已经关注，已复核'}[result['status']],result=result);record_execution(j,index,started);write('unfollow-job.json',j)
-                catalog=data()
-                for a in catalog['accounts']:
-                    if a['id']==item['id']:
-                        a.update(subscribed=result['subscribed'],following_verified=True,was_unfollowed=True)
-                        a['refollowed_at' if result['subscribed'] else 'unfollowed_at']=now()
-                        if not result['subscribed']:
-                            a['history_started_at']=a['unfollowed_at']
-                            a['history_expires_at']=(parsed_date(a['unfollowed_at'])+datetime.timedelta(days=HISTORY_DAYS)).isoformat()
-                write('live-accounts-probe.json',catalog)
-                history=read('account-history.json',[]);history.append({'id':item['id'],'name':item.get('name',''),'action':j.get('kind','unfollow'),'status':result['status'],'at':now(),'execution_ms':j['items'][index].get('execution_ms')});write('account-history.json',history)
-                if j.get('kind')=='follow' and j.get('protect_after'):
-                    write('whitelist.json',{'ids':list(dict.fromkeys([*white(),item['id']])),'updated_at':now()})
-            if STOP.is_set():break
         with LOCK:
-            j=job();j.update(status='stopped' if STOP.is_set() else 'completed',finished_at=now());write('unfollow-job.json',j)
+            j=job()
+            if not j or j['id']!=job_id or STOP.is_set():return True
+            item=j['items'][index]
+            if item['status'] in TERMINAL:return True
+            if j.get('kind')!='follow' and item['id'] in white():raise RuntimeError('账号已在白名单中，执行停止')
+            item.update(status='running',execution_started_at=now());write('unfollow-job.json',j)
+        started=time.monotonic();invoked=True
+        if j.get('kind')=='follow':result=MANAGER.call('follow',CURRENT,item['id'])
+        elif j.get('mode','safe')=='safe':result=action(item['id'])
+        else:result=fast_action(item['id'])
+        verify_identity()
     except Exception as e:
         with LOCK:
             j=job()
-            if j:j.update(status='paused',message=str(e));write('unfollow-job.json',j)
+            if not j or j['id']!=job_id:return False
+            detail=getattr(e,'result',{}) if invoked else {'mutation_sent':False,'stage':'preflight'}
+            j['items'][index].update(status='blocked' if detail.get('mutation_sent') is False else 'uncertain',message=str(e),diagnostic=detail);record_execution(j,index,started);write('unfollow-job.json',j)
+        return False
+    with LOCK:
+        j=job()
+        if not j or j['id']!=job_id:return False
+        record_execution(j,index,started);store_result(j,index,result);write('unfollow-job.json',j)
+    return True
+
+def run_job(job_id):
+    run_started=time.monotonic()
+    try:
+        current=job();indexes=[i for i,item in enumerate(current['items']) if item['status'] not in TERMINAL]
+        width=3 if current.get('kind')!='follow' and current.get('mode')=='turbo' else 1
+        failed=False
+        for offset in range(0,len(indexes),width):
+            if STOP.is_set():break
+            batch=indexes[offset:offset+width]
+            if width==1:results=[process_item(job_id,batch[0])]
+            else:
+                with ThreadPoolExecutor(max_workers=width) as pool:results=[future.result() for future in [pool.submit(process_item,job_id,index) for index in batch]]
+            if not all(results):failed=True;break
+        with LOCK:
+            j=job()
+            if not j or j['id']!=job_id:return
+            j['wall_time_ms']=j.get('wall_time_ms',0)+round((time.monotonic()-run_started)*1000);j['finished_at']=now()
+            if failed or any(item['status'] in ('blocked','uncertain') for item in j['items']):
+                message='已暂停。继续前会重新核对账号和关注状态。' if j.get('mode','safe')=='safe' or j.get('kind')=='follow' else '已暂停。当前模式不复核关注状态，请先在微信确认异常项，再决定是否继续。'
+                j.update(status='paused',message=message)
+            elif STOP.is_set():j.update(status='stopped',message='队列已停止。超级快速模式最多仍有 3 个已经发出的请求。' if j.get('mode')=='turbo' else '队列已停止。')
+            else:j.update(status='completed',message='全部请求已处理。' if j.get('mode')=='safe' or j.get('kind')=='follow' else '全部取关请求已被微信接收；本模式未逐项复核关注状态。')
+            j.pop('run_started_at',None)
+            write('unfollow-job.json',j)
+    except Exception as e:
+        with LOCK:
+            j=job()
+            if j:
+                j.update(status='paused',message=str(e),finished_at=now(),wall_time_ms=j.get('wall_time_ms',0)+round((time.monotonic()-run_started)*1000));j.pop('run_started_at',None);write('unfollow-job.json',j)
 
 def launch_job(j):
     global WORKER
-    write('unfollow-job.json',j);STOP.clear();WORKER=threading.Thread(target=run_job,args=(j['id'],),daemon=True);WORKER.start()
+    j['run_started_at']=now();j.pop('finished_at',None);write('unfollow-job.json',j);STOP.clear();WORKER=threading.Thread(target=run_job,args=(j['id'],),daemon=True);WORKER.start()
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args):pass
@@ -269,7 +301,7 @@ class Handler(BaseHTTPRequestHandler):
                     if j and j['status']=='running':j['status']='stopping';write('unfollow-job.json',j)
                 return self.send(200,{'ok':True})
             with LOCK:
-                if active() or CONNECTING:raise ValueError('正在处理，请先停止并等待当前账号复核完成')
+                if active() or CONNECTING:raise ValueError('正在处理，请先停止并等待当前请求完成')
                 if self.path=='/api/connect':CONNECTING=True
             if self.path=='/api/connect':
                 try:return self.send(200,connect())
@@ -301,24 +333,26 @@ class Handler(BaseHTTPRequestHandler):
                     account_id=req.get('id');known=ids_checked([account_id]);a=known[account_id]
                     if not (a.get('was_unfollowed') or a.get('subscribed') is False):raise ValueError('该账号没有本机取关记录')
                     ensure_ready()
-                    j={'id':uuid.uuid4().hex,'kind':'follow','protect_after':req.get('protect_after') is True,'profile_key':CURRENT['profile_key'],'session_key':CURRENT['session_key'],'status':'running','started_at':now(),'items':[{**a,'status':'queued'}]}
+                    j={'id':uuid.uuid4().hex,'kind':'follow','mode':'safe','protect_after':req.get('protect_after') is True,'profile_key':CURRENT['profile_key'],'session_key':CURRENT['session_key'],'status':'running','started_at':now(),'items':[{**a,'status':'queued'}]}
                     launch_job(j);return self.send(200,j)
                 if self.path=='/api/execute':
+                    mode=req.get('mode','safe')
+                    if mode not in MODES:raise ValueError('执行模式无效，请重新选择')
                     plan=read('selected-accounts.json')
                     if not plan or req.get('plan_id')!=plan['plan_id'] or plan.get('consumed'):raise ValueError('清单已变化或已执行，请重新生成')
                     if plan.get('session_key')!=CURRENT['session_key']:raise ValueError('清单属于旧会话，请重新选择')
                     ids=[a['id'] for a in plan['selected_accounts']];ids_checked(ids)
                     if not ids or set(ids)&set(white()):raise ValueError('清单为空或包含白名单账号')
                     ensure_ready()
-                    j={'id':uuid.uuid4().hex,'plan_id':plan['plan_id'],'profile_key':CURRENT['profile_key'],'session_key':CURRENT['session_key'],'status':'running','started_at':now(),'items':[{**a,'status':'queued'} for a in plan['selected_accounts']]}
+                    j={'id':uuid.uuid4().hex,'kind':'unfollow','mode':mode,'plan_id':plan['plan_id'],'profile_key':CURRENT['profile_key'],'session_key':CURRENT['session_key'],'status':'running','started_at':now(),'items':[{**a,'status':'queued'} for a in plan['selected_accounts']]}
                     plan['consumed']=True;write('selected-accounts.json',plan);launch_job(j);return self.send(200,j)
                 if self.path=='/api/resume':
                     j=job()
                     if not j or req.get('job_id')!=j['id'] or j['status'] not in ('paused','stopped'):raise ValueError('没有可继续的队列')
                     if j.get('profile_key')!=CURRENT['profile_key'] or j.get('session_key')!=CURRENT['session_key']:raise ValueError('登录会话已变化，请重新选择未完成账号')
-                    pending=[a['id'] for a in j['items'] if a['status'] not in ('unfollowed','already_unfollowed','followed','already_followed')];ids_checked(pending)
+                    pending=[a['id'] for a in j['items'] if a['status'] not in TERMINAL];ids_checked(pending)
                     if j.get('kind')!='follow' and set(pending)&set(white()):raise ValueError('未完成项包含白名单账号')
-                    ensure_ready();j.update(status='running',message='正在核实并继续未完成项。',resumed_at=now());launch_job(j);return self.send(200,j)
+                    ensure_ready();resume_message='正在核实并继续未完成项。' if j.get('mode','safe')=='safe' or j.get('kind')=='follow' else '正在继续发送未完成的取关请求；本模式不复核关注状态。';j.update(status='running',message=resume_message,resumed_at=now());launch_job(j);return self.send(200,j)
             return self.send(404,{'error':'not found'})
         except (ValueError,TypeError,RuntimeError) as e:return self.send(409,{'error':str(e)})
         except Exception:return self.send(500,{'error':'服务处理失败，操作已停止'})

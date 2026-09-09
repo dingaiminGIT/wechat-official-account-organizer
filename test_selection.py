@@ -37,6 +37,9 @@ class SafetyTests(unittest.TestCase):
  def test_incompatible_never_consumes_or_executes(self):
   p=self.plan();m.ensure_ready.side_effect=RuntimeError('unsupported version')
   self.assertEqual(self.post('/api/execute',{'plan_id':p['plan_id']})[0],409);self.assertFalse(m.read('selected-accounts.json')['consumed']);self.assertEqual(self.calls,[])
+ def test_invalid_mode_never_consumes_or_executes(self):
+  p=self.plan();self.assertEqual(self.post('/api/execute',{'plan_id':p['plan_id'],'mode':'reckless'})[0],409)
+  self.assertFalse(m.read('selected-accounts.json')['consumed']);self.assertEqual(self.calls,[])
  def test_account_switch_rejects_and_hides_data(self):
   p=self.plan();old=m.CURRENT.copy();self.ident={'profile_key':'b'*64,'session_key':'t'*64,'label':'other'}
   self.assertEqual(self.post('/api/execute',{'plan_id':p['plan_id']},identity=old)[0],409);self.assertEqual(m.snapshot()['catalog']['accounts'],[]);self.assertEqual(self.calls,[])
@@ -52,8 +55,9 @@ class SafetyTests(unittest.TestCase):
   def switched(i):self.calls.append(i);self.ident['session_key']='changed';return self.result
   m.action.side_effect=switched;p=self.plan(['a','b']);self.post('/api/execute',{'plan_id':p['plan_id']});self.wait();self.assertEqual(self.calls,['a']);self.assertEqual(m.job()['status'],'paused')
  def test_resume_skips_completed_and_rejects_new_session(self):
-  m.write('unfollow-job.json',{'id':'resume','profile_key':m.CURRENT['profile_key'],'session_key':m.CURRENT['session_key'],'status':'paused','items':[{'id':'a','status':'unfollowed'},{'id':'b','status':'uncertain'}]})
-  self.assertEqual(self.post('/api/resume',{'job_id':'resume'})[0],200);self.wait();self.assertEqual(self.calls,['b']);self.assertEqual(m.job()['status'],'completed')
+  m.write('unfollow-job.json',{'id':'resume','mode':'fast','profile_key':m.CURRENT['profile_key'],'session_key':m.CURRENT['session_key'],'status':'paused','items':[{'id':'a','status':'unfollowed_unverified'},{'id':'b','status':'uncertain'}]})
+  with patch.object(m,'fast_action',return_value={'status':'unfollowed_unverified','subscribed':False,'verified':False}) as fast:
+   self.assertEqual(self.post('/api/resume',{'job_id':'resume'})[0],200);self.wait();fast.assert_called_once_with('b');self.assertEqual(m.job()['status'],'completed')
   j=m.job();j.update(status='paused',session_key='old');m.write('unfollow-job.json',j);self.assertEqual(self.post('/api/resume',{'job_id':'resume'})[0],409)
  def test_concurrent_execute_is_not_duplicated(self):
   gate=threading.Event()
@@ -72,6 +76,31 @@ class SafetyTests(unittest.TestCase):
   def stopped(i):self.calls.append(i);m.STOP.set();return self.result
   m.action.side_effect=stopped;p=self.plan(['a','b']);self.post('/api/execute',{'plan_id':p['plan_id']});self.wait()
   self.assertEqual(self.calls,['a']);self.assertEqual(m.job()['status'],'stopped')
+ def test_fast_mode_is_serial_and_records_unverified_results(self):
+  active=0;peak=0;guard=threading.Lock();calls=[]
+  def fast(account_id):
+   nonlocal active,peak
+   with guard:active+=1;peak=max(peak,active)
+   time.sleep(.02)
+   with guard:active-=1
+   calls.append(account_id);return {'status':'unfollowed_unverified','subscribed':False,'verified':False}
+  with patch.object(m,'fast_action',side_effect=fast):
+   p=self.plan(['a','b']);self.assertEqual(self.post('/api/execute',{'plan_id':p['plan_id'],'mode':'fast'})[0],200);self.wait()
+  self.assertEqual(calls,['a','b']);self.assertEqual(peak,1);self.assertEqual(m.action.call_count,0)
+  self.assertTrue(all(item['status']=='unfollowed_unverified' for item in m.job()['items']));self.assertTrue(all(a['following_verified'] is False for a in m.data()['accounts'] if a['id'] in ('a','b')))
+ def test_turbo_mode_limits_parallelism_to_three(self):
+  ids=list('abcdef');m.write('live-accounts-probe.json',{'profile_key':m.CURRENT['profile_key'],'capturedAt':'fixture','accounts':[{'id':x,'name':x} for x in ids+['w']]})
+  active=0;peak=0;guard=threading.Lock()
+  def fast(account_id):
+   nonlocal active,peak
+   with guard:active+=1;peak=max(peak,active)
+   time.sleep(.04)
+   with guard:active-=1
+   return {'status':'unfollowed_unverified','subscribed':False,'verified':False}
+  with patch.object(m,'fast_action',side_effect=fast) as call:
+   p=self.plan(ids);self.assertEqual(self.post('/api/execute',{'plan_id':p['plan_id'],'mode':'turbo'})[0],200);self.wait()
+  self.assertEqual(call.call_count,6);self.assertEqual(peak,3);self.assertEqual(m.action.call_count,0);self.assertEqual(m.job()['status'],'completed')
+  self.assertLess(m.job()['wall_time_ms'],m.job()['execution_ms'])
  def test_refollow_requires_history_and_preserves_protection(self):
   with patch.object(m.MANAGER,'call',return_value={'status':'followed','subscribed':True}) as follow:
    self.assertEqual(self.post('/api/refollow',{'id':'a','protect_after':True})[0],409);follow.assert_not_called()

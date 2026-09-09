@@ -1,18 +1,28 @@
 # 批量取关公众号
 
-一个在 Mac 本机整理微信公众号关注列表的自由软件。它可以读取当前微信账号的公众号列表，按名称或账号 ID 搜索，批量选择、维护白名单、生成取关清单，并在再次确认后逐个执行和复核。最近 30 天的取关记录可以用来恢复关注。
+一个在 Mac 本机整理微信公众号关注列表的自由软件。它可以读取当前微信账号的公众号列表，按名称或账号 ID 搜索，批量选择、维护白名单、生成取关清单，并提供超稳妥、快速和超级快速三种执行模式。最近 30 天的取关记录可以用来恢复关注。
 
 > 当前版本仅支持 **Apple Silicon**（M1、M2、M3、M4 及后续同架构芯片），**不支持 Intel Mac**。目前只验证了 macOS 26.6.2、微信 4.1.11 与 WMPF build 269136 的组合。
 
 这是非官方实验性工具，与腾讯、微信没有关联，也没有得到其认可。它依赖调试接入和微信辅助程序签名调整，可能因微信升级失效，也无法保证平台账号零风险。请只处理你自己的账号，并先少量测试。
 
+![生成包含 185 个账号的取关清单](https://img.baiyalab.com/i/2026/09/09b7e7a68c93e728980b-eb7655b3.png)
+
+一次真实执行中，应用用超稳妥模式完成了 185/185 个账号的取关与复核，总耗时 18 分 54 秒。v0.4.0 仍默认使用这个模式，同时增加了省略前后状态查询的快速模式，以及最多 3 个并行请求的实验性超级快速模式。
+
+[![播放批量取关公众号 6 秒真实执行演示](https://img.baiyalab.com/i/2026/09/09b7e7a68c93e728980b-eb7655b3.png)](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.0/wechat-organizer-6s-demo-energetic.mp4)
+
+点击上图播放「燃向配乐版」：保留开始、多个执行进度和 185/185 完成画面，全长 6 秒。
+
+![185 个账号全部取关并复核完成](https://img.baiyalab.com/i/2026/09/e55de8968cd7b78640f6-88a682e1.png)
+
 ## 下载
 
-[下载 v0.3.1 DMG（Apple Silicon）](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.1/WeChatOrganizer-v0.3.1-apple-silicon.dmg)
+[下载 v0.4.0 DMG（Apple Silicon）](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.0/WeChatOrganizer-v0.4.0-apple-silicon.dmg)
 
 打开 DMG 后，把「批量取关公众号.app」拖入“应用程序”。当前版本采用 ad-hoc 签名，尚未经过 Apple 公证。第一次打开时，请在 Finder 的“应用程序”文件夹里右键点击「批量取关公众号.app」，然后选择“打开”。如果仍被拦截，请到“系统设置 → 隐私与安全性”中确认打开。不要下载来源不明的转载包。
 
-[备用 ZIP 下载](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.3.1/WeChatOrganizer-v0.3.1-apple-silicon.zip)
+[备用 ZIP 下载](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.0/WeChatOrganizer-v0.4.0-apple-silicon.zip)
 
 Release 同时提供 `SHA256SUMS.txt`，可以用它核对下载文件是否完整。
 
@@ -25,10 +35,10 @@ Release 同时提供 `SHA256SUMS.txt`，可以用它核对下载文件是否完�
 1. 登录微信并打开公众号页面，启动应用并查看兼容性检查。
 2. 点击“开始连接”，在微信左侧进入小程序列表，再打开任意一个小程序的内容页。只停在小程序列表不够；使用期间请保持该窗口打开。
 3. 搜索或选择账号，把重要账号加入白名单，然后生成取关清单。
-4. 核对清单后点击“开始取关”。应用串行处理，每完成一个账号都会立即查询并复核结果；不确定时会暂停，不会继续盲目执行。
+4. 核对清单并选择执行模式：超稳妥模式会逐个执行并在前后查询状态；快速模式逐个发送、不做前后状态查询；实验性的超级快速模式最多同时发送 3 个请求。三种模式都会继续校验当前微信账号、会话、白名单和微信操作回执。
 5. 在“取关记录 / 恢复关注”中查看最近 30 天的记录。恢复关注后默认加入白名单。
 
-退出应用会停止后续队列，并等待当前账号完成复核。不会退出微信。
+退出应用会停止后续队列，并等待已经发出的请求完成。不会退出微信。
 
 ## 数据与安全边界
 
@@ -59,7 +69,7 @@ python3 -m unittest -v test_guards.py test_selection.py
 
 ## 支持范围与升级策略
 
-支持矩阵和微信组件 SHA-256 位于 [`compatibility.json`](compatibility.json)。未知版本不会尝试接入，也不会自动降级微信或关闭系统保护。每次新增兼容版本都应重新验证列表读取、账号隔离、白名单、取关回执、结果复核、恢复关注和中断恢复。
+支持矩阵和微信组件 SHA-256 位于 [`compatibility.json`](compatibility.json)。未知版本不会尝试接入，也不会自动降级微信或关闭系统保护。每次新增兼容版本都应重新验证列表读取、账号隔离、白名单、三种取关模式、取关回执、结果复核、恢复关注和中断恢复。
 
 WMPFDebugger 固定在提交 `1d9f6e03a24dcd39baa223e25a883a85b84bd303`，源码位于 [`third_party/WMPFDebugger`](third_party/WMPFDebugger)。本项目对它所做的修改记录在 [`MODIFICATIONS.md`](third_party/WMPFDebugger/MODIFICATIONS.md)。
 
