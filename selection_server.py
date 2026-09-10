@@ -183,8 +183,30 @@ def connect():
             plan.update(consumed=True);write('selected-accounts.json',plan)
     return snapshot()
 
-TERMINAL={'unfollowed','unfollowed_unverified','already_unfollowed','followed','already_followed'}
+TERMINAL={'unfollowed','unfollowed_unverified','already_unfollowed','followed','followed_unverified','already_followed','skipped_unavailable'}
 MODES={'safe','fast','turbo'}
+def unavailable_follow_reason(detail):
+    # Only an explicit account-level rejection from the follow callback is skippable.
+    if detail.get('stage')!='follow':return None
+    error=detail.get('error','')
+    if not isinstance(error,str) or not error.startswith('微信未确认操作：'):return None
+    response=error.removeprefix('微信未确认操作：').strip().lower()
+    reasons={
+        '该公众号因违规无法关注':('unable to follow this official account as it has violated the regulations','该公众号因违规无法关注','该账号因违规无法关注','该帐号因违规无法关注'),
+        '该公众号已注销，无法关注':('this official account has been deleted','this official account has been deregistered','该公众号已注销','该公众号已被注销','该账号已注销','该帐号已注销','公众号已注销'),
+    }
+    for reason,phrases in reasons.items():
+        if any(phrase in response for phrase in phrases):return reason
+    return None
+
+def store_follow_skip(j,index,detail,reason):
+    item=j['items'][index]
+    item.update(status='skipped_unavailable',message=reason+'，已跳过',diagnostic=detail)
+    # A rejected follow must not change the cached subscription, recovery date or whitelist.
+    history=read('account-history.json',[])
+    history.append({'id':item['id'],'name':item.get('name',''),'action':'follow','status':'skipped_unavailable','reason':reason,'verified':False,'at':now(),'execution_ms':item.get('execution_ms')})
+    write('account-history.json',history)
+
 def action(account_id):return MANAGER.call('unfollow',CURRENT,account_id)
 def fast_action(account_id):return MANAGER.call('unfollow_request',CURRENT,account_id)
 def record_execution(j,index,started):
@@ -192,17 +214,17 @@ def record_execution(j,index,started):
     item['execution_ms']=item.get('execution_ms',0)+elapsed;item['execution_finished_at']=now();item.pop('execution_started_at',None);j['execution_ms']=j.get('execution_ms',0)+elapsed
 
 def store_result(j,index,result):
-    item=j['items'][index];messages={'unfollowed':'已取关并复核','unfollowed_unverified':'已取关，未复核','already_unfollowed':'已未关注，跳过','followed':'已重新关注并复核','already_followed':'已经关注，已复核'}
+    item=j['items'][index];messages={'unfollowed':'已取关并复核','unfollowed_unverified':'已取关，未复核','already_unfollowed':'已未关注，跳过','followed':'已重新关注并复核','followed_unverified':'已重新关注，未复核','already_followed':'已经关注，已复核'}
     item.update(status=result['status'],message=messages[result['status']],result=result)
     catalog=data()
     for a in catalog['accounts']:
         if a['id']==item['id']:
-            a.update(subscribed=result['subscribed'],following_verified=result.get('verified',result['status']!='unfollowed_unverified'),was_unfollowed=True)
+            a.update(subscribed=result['subscribed'],following_verified=result.get('verified',result['status'] not in ('unfollowed_unverified','followed_unverified')),was_unfollowed=True)
             a['refollowed_at' if result['subscribed'] else 'unfollowed_at']=now()
             if not result['subscribed']:
                 a['history_started_at']=a['unfollowed_at'];a['history_expires_at']=(parsed_date(a['unfollowed_at'])+datetime.timedelta(days=HISTORY_DAYS)).isoformat()
     write('live-accounts-probe.json',catalog)
-    history=read('account-history.json',[]);history.append({'id':item['id'],'name':item.get('name',''),'action':j.get('kind','unfollow'),'status':result['status'],'verified':result.get('verified',result['status']!='unfollowed_unverified'),'at':now(),'execution_ms':item.get('execution_ms')});write('account-history.json',history)
+    history=read('account-history.json',[]);history.append({'id':item['id'],'name':item.get('name',''),'action':j.get('kind','unfollow'),'status':result['status'],'verified':result.get('verified',result['status'] not in ('unfollowed_unverified','followed_unverified')),'at':now(),'execution_ms':item.get('execution_ms')});write('account-history.json',history)
     if j.get('kind')=='follow' and j.get('protect_after'):write('whitelist.json',{'ids':list(dict.fromkeys([*white(),item['id']])),'updated_at':now()})
 
 def process_item(job_id,index):
@@ -216,15 +238,22 @@ def process_item(job_id,index):
             if j.get('kind')!='follow' and item['id'] in white():raise RuntimeError('账号已在白名单中，执行停止')
             item.update(status='running',execution_started_at=now());write('unfollow-job.json',j)
         started=time.monotonic();invoked=True
-        if j.get('kind')=='follow':result=MANAGER.call('follow',CURRENT,item['id'])
+        if j.get('kind')=='follow':result=MANAGER.call('follow_request' if j.get('mode','safe')=='fast' else 'follow',CURRENT,item['id'])
         elif j.get('mode','safe')=='safe':result=action(item['id'])
         else:result=fast_action(item['id'])
         verify_identity()
     except Exception as e:
+        detail=getattr(e,'result',{}) if invoked else {'mutation_sent':False,'stage':'preflight'}
+        reason=unavailable_follow_reason(detail) if (j or {}).get('kind')=='follow' else None
+        if reason:
+            try:verify_identity()
+            except Exception as identity_error:e=identity_error;reason=None;detail={'stage':'identity','mutation_sent':True}
         with LOCK:
             j=job()
             if not j or j['id']!=job_id:return False
-            detail=getattr(e,'result',{}) if invoked else {'mutation_sent':False,'stage':'preflight'}
+            if reason:
+                record_execution(j,index,started);store_follow_skip(j,index,detail,reason);write('unfollow-job.json',j)
+                return True
             j['items'][index].update(status='blocked' if detail.get('mutation_sent') is False else 'uncertain',message=str(e),diagnostic=detail);record_execution(j,index,started);write('unfollow-job.json',j)
         return False
     with LOCK:
@@ -251,7 +280,7 @@ def run_job(job_id):
             if not j or j['id']!=job_id:return
             j['wall_time_ms']=j.get('wall_time_ms',0)+round((time.monotonic()-run_started)*1000);j['finished_at']=now()
             if failed or any(item['status'] in ('blocked','uncertain') for item in j['items']):
-                message='已暂停。继续前会重新核对账号和关注状态。' if j.get('mode','safe')=='safe' or j.get('kind')=='follow' else '已暂停。当前模式不复核关注状态，请先在微信确认异常项，再决定是否继续。'
+                message='已暂停。继续前会重新核对账号和关注状态。' if j.get('mode','safe')=='safe' else '已暂停。当前模式不复核关注状态，请先在微信确认异常项，再决定是否继续。'
                 j.update(status='paused',message=message)
             elif STOP.is_set():j.update(status='stopped',message='队列已停止。超级快速模式最多仍有 3 个已经发出的请求。' if j.get('mode')=='turbo' else '队列已停止。')
             else:j.update(status='completed',message='全部请求已处理。' if j.get('mode')=='safe' or j.get('kind')=='follow' else '全部取关请求已被微信接收；本模式未逐项复核关注状态。')
@@ -330,6 +359,8 @@ class Handler(BaseHTTPRequestHandler):
                     plan={**{k:CURRENT[k] for k in ('profile_key','session_key')},'plan_id':uuid.uuid4().hex,'selected_accounts':[known[i] for i in ids],'count':len(ids),'source_captured_at':data()['capturedAt'],'created_at':now(),'consumed':False}
                     write('selected-accounts.json',plan);return self.send(200,plan)
                 if self.path=='/api/refollow':
+                    mode=req.get('mode','fast')
+                    if mode not in ('safe','fast'):raise ValueError('重新关注模式无效，请重新选择')
                     ids=req.get('ids') if 'ids' in req else [req.get('id')]
                     known=ids_checked(ids)
                     if not ids:raise ValueError('请先选择要重新关注的账号')
@@ -337,7 +368,7 @@ class Handler(BaseHTTPRequestHandler):
                     protect_after=req.get('protect_after',False)
                     if not isinstance(protect_after,bool):raise ValueError('请选择是否加入白名单')
                     ensure_ready()
-                    j={'id':uuid.uuid4().hex,'kind':'follow','mode':'safe','protect_after':protect_after,'profile_key':CURRENT['profile_key'],'session_key':CURRENT['session_key'],'status':'running','started_at':now(),'items':[{**known[i],'status':'queued'} for i in ids]}
+                    j={'id':uuid.uuid4().hex,'kind':'follow','mode':mode,'protect_after':protect_after,'profile_key':CURRENT['profile_key'],'session_key':CURRENT['session_key'],'status':'running','started_at':now(),'items':[{**known[i],'status':'queued'} for i in ids]}
                     launch_job(j);return self.send(200,j)
                 if self.path=='/api/execute':
                     mode=req.get('mode','safe')
@@ -353,10 +384,14 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path=='/api/resume':
                     j=job()
                     if not j or req.get('job_id')!=j['id'] or j['status'] not in ('paused','stopped'):raise ValueError('没有可继续的队列')
+                    if j.get('kind')=='follow':
+                        mode=req.get('mode',j.get('mode','safe'))
+                        if mode not in ('safe','fast'):raise ValueError('重新关注模式无效，请重新选择')
+                        j['mode']=mode
                     if j.get('profile_key')!=CURRENT['profile_key'] or j.get('session_key')!=CURRENT['session_key']:raise ValueError('登录会话已变化，请重新选择未完成账号')
                     pending=[a['id'] for a in j['items'] if a['status'] not in TERMINAL];ids_checked(pending)
                     if j.get('kind')!='follow' and set(pending)&set(white()):raise ValueError('未完成项包含白名单账号')
-                    ensure_ready();resume_message='正在核实并继续未完成项。' if j.get('mode','safe')=='safe' or j.get('kind')=='follow' else '正在继续发送未完成的取关请求；本模式不复核关注状态。';j.update(status='running',message=resume_message,resumed_at=now());launch_job(j);return self.send(200,j)
+                    ensure_ready();resume_message='正在核实并继续未完成项。' if j.get('mode','safe')=='safe' else ('正在继续发送未完成的关注请求；本模式不复核关注状态。' if j.get('kind')=='follow' else '正在继续发送未完成的取关请求；本模式不复核关注状态。');j.update(status='running',message=resume_message,resumed_at=now());launch_job(j);return self.send(200,j)
             return self.send(404,{'error':'not found'})
         except (ValueError,TypeError,RuntimeError) as e:return self.send(409,{'error':str(e)})
         except Exception:return self.send(500,{'error':'服务处理失败，操作已停止'})

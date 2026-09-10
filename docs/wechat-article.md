@@ -48,6 +48,16 @@ AI 编程对我最大的意义，也正在这里。不是凭空想一个大产�
 
 18 分 54 秒也让我意识到：安全不能只有一种速度。数据里每个账号平均约 6.1 秒，时间主要花在取关前后的状态查询和身份核验上。所以新版保留超稳妥模式作为默认值，又增加了快速和超级快速模式。后两种不会假装自己已经复核，界面会明确显示「已取关，未复核」。
 
+后来我又重新关注了一小批账号，试了快速模式：**16 个号，21.3 秒。平均一个约 1.33 秒。**
+
+![快速模式实测：16 个公众号，21.3 秒](https://img.baiyalab.com/i/2026/09/eb8fb535b0dfcb49efa1-dd54790e.png)
+
+这次终于有“随手整理一下”的感觉了。之前超稳妥模式平均一个约 6.1 秒，现在一小批几十秒就能完成。两次处理的号和数量不同，这不是严格的性能对照，只是我自己真实用下来的一次体验。图里用的是串行快速模式，还没有用到并行那一档；结果仍会明确显示「已取关，未复核」。
+
+测试时又碰到一个小麻烦：想重新关注几个号，原来只能一个个点，还默认塞进白名单。于是我又补了批量重新关注，白名单改成自己选。碰到微信明确提示已注销、或公众号因违规无法关注的，就记下原因跳过去，不让一个无法恢复的号卡住整批。
+
+重新关注也提供了快速恢复，默认以微信成功回执为准，省掉前后状态查询；需要每个号都确认到位时，再选逐项复核。它还没有这次取关一样的实测数据，就先不报速度了。
+
 我没有做“一键清空”，因为快不是唯一目标。列表里总有几个重要的号，批量工具必须先让我敢用，再谈帮我省多少时间。
 
 ## 用 AI 造垃圾，也要认真造
@@ -70,7 +80,7 @@ AI 编程对我最大的意义，也正在这里。不是凭空想一个大产�
 
 [wechat-official-account-organizer](https://github.com/dingaiminGIT/wechat-official-account-organizer)
 
-[直接下载 Apple Silicon 版 DMG](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.0/WeChatOrganizer-v0.4.0-apple-silicon.dmg)
+[直接下载 Apple Silicon 版 DMG](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.4/WeChatOrganizer-v0.4.4-apple-silicon.dmg)
 
 最后补两句使用边界：底层依赖 WMPFDebugger，所以项目按 GPLv2 开源；目前只支持 Apple Silicon Mac，GitHub 已提供可以直接下载的 DMG。安装包还没有经过 Apple 签名和公证。第一次打开时，请在 Finder 的“应用程序”文件夹里右键点击「批量取关公众号.app」，然后选择“打开”。正式使用前，还是建议先拿一两个不重要的账号试验。
 

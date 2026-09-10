@@ -106,7 +106,7 @@ class SafetyTests(unittest.TestCase):
    self.assertEqual(self.post('/api/refollow',{'id':'a','protect_after':True})[0],409);follow.assert_not_called()
    catalog=m.data();catalog['accounts'][0].update(subscribed=False,was_unfollowed=True,unfollowed_at=m.now());m.write('live-accounts-probe.json',catalog)
    self.assertEqual(self.post('/api/refollow',{'id':'a','protect_after':True})[0],200);self.wait()
-   follow.assert_called_once_with('follow',m.CURRENT,'a');self.assertIn('a',m.white())
+   follow.assert_called_once_with('follow_request',m.CURRENT,'a');self.assertIn('a',m.white())
    a=m.data()['accounts'][0];self.assertTrue(a['was_unfollowed']);self.assertTrue(a['subscribed']);self.assertEqual(m.job()['status'],'completed');self.assertEqual(m.read('account-history.json')[0]['action'],'follow')
  def test_refollow_uncertain_pauses_without_claiming_recovery(self):
   catalog=m.data();catalog['accounts'][0].update(subscribed=False,was_unfollowed=True,unfollowed_at=m.now());m.write('live-accounts-probe.json',catalog)
@@ -151,6 +151,52 @@ class SafetyTests(unittest.TestCase):
    self.assertEqual(self.post('/api/resume',{'job_id':m.job()['id']})[0],200);self.wait()
    self.assertEqual([call.args[2] for call in follow.call_args_list],['b','w'])
   self.assertEqual(m.job()['status'],'completed');self.assertEqual(m.white(),['w'])
+ def follow_rejection(self,message,stage='follow'):
+  e=RuntimeError('微信未确认操作：'+message);e.result={'error':str(e),'stage':stage,'mutation_sent':True};return e
+ def test_unavailable_follow_skips_and_continues_without_protecting_or_claiming_success(self):
+  self.restore_fixture();before=m.data()['accounts'][0].copy()
+  violation=self.follow_rejection('Unable to follow this Official Account as it has violated the regulations')
+  deleted=self.follow_rejection('该公众号已注销，无法关注')
+  with patch.object(m.MANAGER,'call',side_effect=[violation,deleted,{'status':'followed','subscribed':True}]) as follow:
+   self.assertEqual(self.post('/api/refollow',{'ids':['a','b','w'],'protect_after':True})[0],200);self.wait()
+   self.assertEqual(follow.call_count,3)
+  self.assertEqual(m.job()['status'],'completed');self.assertEqual([i['status'] for i in m.job()['items']],['skipped_unavailable','skipped_unavailable','followed'])
+  self.assertEqual(m.white(),['w']);self.assertFalse(m.data()['accounts'][0]['subscribed']);self.assertNotIn('refollowed_at',m.data()['accounts'][0]);self.assertEqual(m.data()['accounts'][0]['unfollowed_at'],before['unfollowed_at'])
+  self.assertEqual([e['status'] for e in m.read('account-history.json')],['skipped_unavailable','skipped_unavailable','followed'])
+  j=m.job();j.update(status='stopped');j['items'][2]['status']='queued';m.write('unfollow-job.json',j)
+  with patch.object(m.MANAGER,'call',return_value={'status':'already_followed','subscribed':True}) as follow:
+   self.assertEqual(self.post('/api/resume',{'job_id':j['id']})[0],200);self.wait();follow.assert_called_once_with('follow_request',m.CURRENT,'w')
+ def test_generic_follow_error_or_wrong_stage_still_pauses(self):
+  for e in [self.follow_rejection('system error'),self.follow_rejection('操作过于频繁，请稍后重试'),self.follow_rejection('该公众号已注销','verify'),RuntimeError('操作回执超时')]:
+   with self.subTest(error=str(e)):
+    self.restore_fixture()
+    with patch.object(m.MANAGER,'call',side_effect=e) as follow:
+     self.assertEqual(self.post('/api/refollow',{'ids':['a','b']})[0],200);self.wait();self.assertEqual(follow.call_count,1)
+    self.assertEqual(m.job()['status'],'paused');self.assertEqual(m.job()['items'][1]['status'],'queued')
+ def test_fast_follow_default_records_ack_without_claiming_verification(self):
+  self.restore_fixture()
+  with patch.object(m.MANAGER,'call',return_value={'status':'followed_unverified','subscribed':True,'verified':False}) as follow:
+   self.assertEqual(self.post('/api/refollow',{'ids':['a','b']})[0],200);self.wait()
+   self.assertEqual([call.args[0] for call in follow.call_args_list],['follow_request','follow_request'])
+  self.assertEqual(m.job()['mode'],'fast');self.assertEqual(m.job()['status'],'completed');self.assertEqual(m.white(),['w'])
+  self.assertTrue(all(a['subscribed'] and not a['following_verified'] for a in m.data()['accounts'] if a['id'] in ('a','b')))
+  self.assertTrue(all(not event['verified'] for event in m.read('account-history.json')))
+ def test_safe_follow_available_and_paused_queue_can_switch_to_fast(self):
+  self.restore_fixture()
+  with patch.object(m.MANAGER,'call',side_effect=RuntimeError('timeout')) as follow:
+   self.assertEqual(self.post('/api/refollow',{'ids':['a','b'],'mode':'safe'})[0],200);self.wait();follow.assert_called_once_with('follow',m.CURRENT,'a')
+  with patch.object(m.MANAGER,'call',return_value={'status':'followed_unverified','subscribed':True,'verified':False}) as follow:
+   self.assertEqual(self.post('/api/resume',{'job_id':m.job()['id'],'mode':'turbo'})[0],409);follow.assert_not_called()
+   self.assertEqual(self.post('/api/resume',{'job_id':m.job()['id'],'mode':'fast'})[0],200);self.wait()
+   self.assertEqual([call.args[0] for call in follow.call_args_list],['follow_request','follow_request'])
+  self.assertEqual(m.job()['status'],'completed');self.assertEqual(m.job()['mode'],'fast')
+ def test_unavailable_follow_does_not_continue_after_identity_changes(self):
+  self.restore_fixture()
+  def changed(*args):
+   self.ident['session_key']='changed';raise self.follow_rejection('该公众号已注销')
+  with patch.object(m.MANAGER,'call',side_effect=changed) as follow:
+   self.assertEqual(self.post('/api/refollow',{'ids':['a','b']})[0],200);self.wait();self.assertEqual(follow.call_count,1)
+  self.assertEqual(m.job()['status'],'paused');self.assertEqual(m.job()['items'][0]['status'],'uncertain');self.assertIsNone(m.read('account-history.json'))
  def test_retention_expires_records_but_keeps_followed_and_whitelist(self):
   at=m.parsed_date('2026-09-07T12:00:00Z');old=(at-m.datetime.timedelta(days=31)).isoformat();recent=(at-m.datetime.timedelta(days=29)).isoformat()
   m.write('live-accounts-probe.json',{'accounts':[{'id':'a','was_unfollowed':True,'subscribed':False,'unfollowed_at':old},{'id':'b','was_unfollowed':True,'subscribed':True,'unfollowed_at':old},{'id':'w','was_unfollowed':True,'subscribed':False,'unfollowed_at':recent}]})

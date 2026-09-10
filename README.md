@@ -10,6 +10,12 @@
 
 一次真实执行中，应用用超稳妥模式完成了 185/185 个账号的取关与复核，总耗时 18 分 54 秒。v0.4.0 仍默认使用这个模式，同时增加了省略前后状态查询的快速模式，以及最多 3 个并行请求的实验性超级快速模式。
 
+后来我又用快速模式实测了 16 个账号，总耗时 **21.3 秒，平均约 1.33 秒/个**。作为对照，前一次超稳妥模式平均约 6.1 秒/个。两次账号和数量不同，不是同一批账号的严格对照测试，但这次已经不用等十几分钟，几十秒就能整理完一小批。
+
+![快速模式实测：16 个公众号，21.3 秒](https://img.baiyalab.com/i/2026/09/eb8fb535b0dfcb49efa1-dd54790e.png)
+
+快速模式以微信成功回执为准，省略取关前后的状态查询，因此结果会显示「已取关，未复核」。这次测试的是串行快速模式，并非超级快速模式。
+
 [![播放批量取关公众号 6 秒真实执行演示](https://img.baiyalab.com/i/2026/09/09b7e7a68c93e728980b-eb7655b3.png)](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.0/wechat-organizer-6s-demo-energetic.mp4)
 
 点击上图播放「燃向配乐版」：保留开始、多个执行进度和 185/185 完成画面，全长 6 秒。
@@ -18,11 +24,11 @@
 
 ## 下载
 
-[下载 v0.4.0 DMG（Apple Silicon）](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.0/WeChatOrganizer-v0.4.0-apple-silicon.dmg)
+[下载 v0.4.4 DMG（Apple Silicon）](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.4/WeChatOrganizer-v0.4.4-apple-silicon.dmg)
 
 打开 DMG 后，把「批量取关公众号.app」拖入“应用程序”。当前版本采用 ad-hoc 签名，尚未经过 Apple 公证。第一次打开时，请在 Finder 的“应用程序”文件夹里右键点击「批量取关公众号.app」，然后选择“打开”。如果仍被拦截，请到“系统设置 → 隐私与安全性”中确认打开。不要下载来源不明的转载包。
 
-[备用 ZIP 下载](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.0/WeChatOrganizer-v0.4.0-apple-silicon.zip)
+[备用 ZIP 下载](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.4/WeChatOrganizer-v0.4.4-apple-silicon.zip)
 
 Release 同时提供 `SHA256SUMS.txt`，可以用它核对下载文件是否完整。
 
@@ -38,6 +44,8 @@ Release 同时提供 `SHA256SUMS.txt`，可以用它核对下载文件是否完�
 4. 核对清单并选择执行模式：超稳妥模式会逐个执行并在前后查询状态；快速模式逐个发送、不做前后状态查询；实验性的超级快速模式最多同时发送 3 个请求。三种模式都会继续校验当前微信账号、会话、白名单和微信操作回执。
 5. 在“取关记录 / 恢复关注”中查看最近 30 天的记录。可以跨页勾选多个账号，或全选本页 / 全部筛选结果，再点击“批量重新关注”并核对清单。单个账号也可以直接点击“重新关注”。
 6. 重新关注时，“同时加入白名单”默认不勾选；需要保护这些账号时再勾选。未加入白名单的账号恢复后可直接在“待整理账号”中选择并测试快速取关。已有白名单保持不变，批量恢复支持停止和继续未完成项。缓存模式下也可以打开重新关注清单，点击“连接微信，保留此清单”恢复连接；已选账号和白名单选项会保留，连接成功后再确认执行。
+7. 恢复关注时，微信明确返回公众号已注销或该公众号因违规无法关注，会记录原因并跳过，继续下一项。跳过项不会算作恢复成功，也不会加入白名单；超时、结果不明或微信会话变化仍会暂停。
+8. 重新关注默认使用“快速恢复”：逐个发送关注请求，以微信成功回执为准，省略前后状态查询，结果标为“已重新关注，未复核”。也可以选择“逐项复核”。已暂停的恢复队列可在“继续未完成项”旁切换恢复方式，已完成和已跳过的项目不会重复执行。
 
 退出应用会停止后续队列，并等待已经发出的请求完成。不会退出微信。
 
@@ -64,6 +72,7 @@ npm ci --prefix third_party/WMPFDebugger
 ```sh
 ./script/build_and_run.sh --build-only
 python3 -m unittest -v test_guards.py test_selection.py
+node --experimental-vm-modules test_action_requests.mjs
 ```
 
 构建结果位于 `dist/批量取关公众号.app`。当前使用 ad-hoc 签名，尚未完成 Developer ID 签名与 Apple 公证。应用包内的 `Contents/Resources/Source` 保存与该二进制对应的完整源码，`Contents/Resources/Licenses` 保存第三方许可证。
