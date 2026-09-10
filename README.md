@@ -31,9 +31,9 @@
 超级快速模式最多同时发送 3 个请求。截图里单个请求仍用了约 1.5～1.6 秒，但等待时间可以重叠，所以 27 个号只用了 14.2 秒；不能把总时间除以数量后的约 0.53 秒，理解成单个请求只需 0.53 秒。三次账号和数量不同，这是实际使用记录，不是严格的同批性能对照。快速和超级快速模式均以微信成功回执为准，没有逐项复核。
 
 
-[![播放批量取关公众号 6 秒真实执行演示](https://img.baiyalab.com/i/2026/09/09b7e7a68c93e728980b-eb7655b3.png)](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.0/wechat-organizer-6s-demo-energetic.mp4)
+https://github.com/user-attachments/assets/f839d38f-4c66-498e-a177-57c471381fef
 
-点击上图播放「燃向配乐版」：保留开始、多个执行进度和 185/185 完成画面，全长 6 秒。
+点击播放器观看「燃向配乐版」：保留开始、多个执行进度和 185/185 完成画面，全长 6 秒，含背景音乐。[无法播放时单独打开视频](https://img.baiyalab.com/i/2026/09/wechat-organizer-demo-9cf3e08e.mp4)。
 
 ![185 个账号全部取关并复核完成](https://img.baiyalab.com/i/2026/09/e55de8968cd7b78640f6-88a682e1.png)
 
