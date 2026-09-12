@@ -9,9 +9,16 @@ def prepare(resources,data):
     if not check['compatible']:raise RuntimeError('当前微信版本未通过验证，不能准备环境')
     package=data/'helper-signing-change'
     if package.exists():
-        _,states=inspect(package,runtime_guard.HELPER)
-        if any(s['state']=='unknown' for s in states):raise RuntimeError('已有备份与微信不匹配')
-        return {'ready':True,'state':states}
+        saved=json.loads((package/'manifest.json').read_text())
+        current=json.loads((resources/'compatibility.json').read_text())['wmpf_build']
+        if saved.get('build')==current:
+            _,states=inspect(package,runtime_guard.HELPER)
+            if any(s['state']=='unknown' for s in states):raise RuntimeError('已有备份与微信不匹配')
+            return {'ready':True,'state':states}
+        if check['signature']!='original':raise RuntimeError('旧版备份与当前微信不匹配，且当前安装不是已验证的原始文件')
+        base=data/f"helper-signing-change-{saved.get('build','unknown')}-archive";archive=base;suffix=1
+        while archive.exists():archive=data/f"{base.name}-{suffix}";suffix+=1
+        os.replace(package,archive)
     if check['signature']!='original':raise RuntimeError('只支持从已验证的原始微信创建备份')
     with tempfile.TemporaryDirectory(prefix='wechat-prepare-',dir=data) as tmp:
         trial=Path(tmp)/'WeChatAppEx.app';shutil.copytree(runtime_guard.HELPER,trial,symlinks=True)
@@ -23,7 +30,8 @@ def prepare(resources,data):
             for kind,base in [('original',runtime_guard.HELPER),('replacement',trial)]:
                 dst=staged/kind/rel;dst.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(base/rel,dst);dst.chmod(0o600)
             files.append({'relative_path':rel,'original_sha256':digest(src),'replacement_sha256':digest(trial/rel),'uid':stat.st_uid,'gid':stat.st_gid,'mode':stat.st_mode&0o777})
-        (staged/'manifest.json').write_text(json.dumps({'target_app':str(runtime_guard.HELPER),'build':'269136','files':files,'applied':False},indent=2));os.replace(staged,package)
+        build=json.loads((resources/'compatibility.json').read_text())['wmpf_build']
+        (staged/'manifest.json').write_text(json.dumps({'target_app':str(runtime_guard.HELPER),'build':build,'files':files,'applied':False},indent=2));os.replace(staged,package)
     return {'ready':True,'message':'已生成本机备份，尚未修改微信'}
 
 def modify(resources,data,action):

@@ -12,6 +12,11 @@ This directory is based on
 - count connected mini-program clients; and
 - detach Frida and close both servers on `SIGINT` or `SIGTERM`.
 
+`frida/config/darwin/addresses.269602.json` adds the offsets independently
+verified for WeChat 4.1.13 / WMPF build 269602 on Apple Silicon. The adapter
+was derived from the `OnLoadStart`, scene `1101`, WebSocket endpoint and
+`SendToClientFilter` code paths in that exact signed framework build.
+
 The npm lock file keeps the upstream dependency ranges but resolves known
 security fixes, including `protobufjs` 7.6.6 and `ws` 8.21.3. `npm audit`
 reports no known vulnerabilities at the time of this release.

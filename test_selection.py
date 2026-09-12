@@ -7,7 +7,7 @@ class SafetyTests(unittest.TestCase):
   self.ident={'profile_key':'a'*64,'session_key':'s'*64,'label':'fixture'};m.CURRENT=self.ident.copy()
   self.idpatch=patch.object(m.runtime_guard,'identity',side_effect=lambda:self.ident.copy());self.idpatch.start()
   self.ready=patch.object(m,'ensure_ready',side_effect=lambda *args,**kwargs:m.verify_identity());self.ready.start()
-  m.write('live-accounts-probe.json',{'profile_key':m.CURRENT['profile_key'],'capturedAt':'fixture','accounts':[{'id':x,'name':x} for x in ['a','b','w']]});m.write('whitelist.json',{'ids':['w']})
+  m.write('live-accounts-probe.json',{'profile_key':m.CURRENT['profile_key'],'capturedAt':'fixture','accounts':[{'id':x,'name':x,'account_type':'service' if x in ('b','w') else 'subscription','service_type':1 if x in ('b','w') else 0} for x in ['a','b','w']]});m.write('whitelist.json',{'ids':['w']})
   self.calls=[];self.result={'status':'unfollowed','subscribed':False}
   def fake(i):self.calls.append(i);return self.result
   self.action=patch.object(m,'action',side_effect=fake);self.action.start()
@@ -34,6 +34,11 @@ class SafetyTests(unittest.TestCase):
   p=self.plan();self.assertEqual(self.post('/api/execute',{'plan_id':p['plan_id']})[0],200);self.wait()
   self.assertEqual(self.calls,['a']);self.assertEqual(m.job()['status'],'completed');self.assertEqual(m.job()['execution_ms'],m.job()['items'][0]['execution_ms'])
   self.assertEqual(self.post('/api/execute',{'plan_id':p['plan_id']})[0],409)
+ def test_service_account_type_survives_plan_and_job(self):
+  p=self.plan(['b']);self.assertEqual(p['selected_accounts'][0]['account_type'],'service')
+  with patch.object(m,'fast_action',return_value={'status':'unfollowed_unverified','subscribed':False,'verified':False}):
+   self.assertEqual(self.post('/api/execute',{'plan_id':p['plan_id'],'mode':'fast'})[0],200);self.wait()
+  self.assertEqual(m.job()['items'][0]['account_type'],'service')
  def test_incompatible_never_consumes_or_executes(self):
   p=self.plan();m.ensure_ready.side_effect=RuntimeError('unsupported version')
   self.assertEqual(self.post('/api/execute',{'plan_id':p['plan_id']})[0],409);self.assertFalse(m.read('selected-accounts.json')['consumed']);self.assertEqual(self.calls,[])
