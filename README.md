@@ -48,7 +48,7 @@ https://github.com/user-attachments/assets/f839d38f-4c66-498e-a177-57c471381fef
 
 [备用 ZIP 下载](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.5.0/WeChatOrganizer-v0.5.0-apple-silicon.zip)
 
-Release 同时提供 `SHA256SUMS.txt`，可以用它核对下载文件是否完整。
+Release 同时提供 [SHA256SUMS-v0.5.0.txt](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.5.0/SHA256SUMS-v0.5.0.txt)，可以用它核对下载文件是否完整。
 
 ## 为什么列表还在，却提示打开小程序
 
