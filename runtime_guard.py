@@ -60,7 +60,12 @@ def preflight(resources,data_root):
         check('微信文件状态',signature in ('original','prepared'),'原始安装' if signature=='original' else '已准备，原始文件备份可用' if signature=='prepared' else '检测到未完成修改，可恢复备份' if signature=='partial' else '文件状态未知，禁止接入')
     except Exception:check('微信安装检查',False,'未找到可验证的微信安装或备份')
     compatible=all(c['ok'] for c in checks)
-    return {'compatible':compatible,'prepared':signature=='prepared','restorable':restorable,'signature':signature,'checks':checks,'adapter':manifest['adapter'],'message':'环境已通过检查' if compatible else '当前环境未通过兼容性检查，取关不可用；请等待经过验证的适配更新。'}
+    file_state=next((c for c in checks if c['name']=='微信文件状态'),None)
+    if compatible:message='环境已通过检查'
+    elif file_state and not file_state['ok']:
+        message='微信版本已支持，但文件状态或本机备份不一致。为避免覆盖错误文件，连接已禁用；请先恢复原文件或重新安装当前微信，再准备连接环境。'
+    else:message='当前环境未通过兼容性检查，取关不可用；请等待经过验证的适配更新。'
+    return {'compatible':compatible,'prepared':signature=='prepared','restorable':restorable,'signature':signature,'checks':checks,'adapter':manifest['adapter'],'message':message}
 
 if __name__=='__main__':
     try:print(json.dumps(identity()))
