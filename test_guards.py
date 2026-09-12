@@ -1,6 +1,7 @@
 import hashlib,json,os,pathlib,plistlib,tempfile,unittest
 from unittest.mock import patch
 import runtime_guard as g
+import environment_ops as env
 from helper_signing_change import change,inspect
 class GuardTests(unittest.TestCase):
  def setUp(self):self.tmp=tempfile.TemporaryDirectory();self.root=pathlib.Path(self.tmp.name)
@@ -33,4 +34,15 @@ class GuardTests(unittest.TestCase):
  def test_corrupt_backup_refuses_restore(self):
   package,target=self.package();(package/'original/Contents/MacOS/WeChatAppEx').write_bytes(b'corrupt')
   with self.assertRaises(RuntimeError):change(package,target,'restore')
+ def test_prepare_archives_stale_build_backup(self):
+  resources=self.root/'resources';data=self.root/'data';helper=self.root/'WeChatAppEx.app'
+  resources.mkdir();data.mkdir();(resources/'compatibility.json').write_text(json.dumps({'wmpf_build':'269602'}))
+  for rel in ['Contents/MacOS/WeChatAppEx','Contents/_CodeSignature/CodeResources']:
+   p=helper/rel;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b'current')
+  stale=data/'helper-signing-change';stale.mkdir();(stale/'manifest.json').write_text(json.dumps({'build':'269136'}))
+  check={'compatible':True,'signature':'original'}
+  with patch.object(env.runtime_guard,'preflight',return_value=check),patch.object(env.runtime_guard,'HELPER',helper),patch.object(env.subprocess,'run'):
+   result=env.prepare(resources,data)
+  self.assertTrue(result['ready']);self.assertTrue((data/'helper-signing-change-269136-archive').exists())
+  self.assertEqual(json.loads((data/'helper-signing-change/manifest.json').read_text())['build'],'269602')
 if __name__=='__main__':unittest.main()

@@ -5,6 +5,19 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const exec=promisify(execFile),root=import.meta.dirname;
 let ws,session,stage='connect',mutationSent=false,seq=Math.floor(Math.random()*1e9);const pending=new Map();
+export function normalizeContactLists(groups){
+ const accounts=new Map();
+ for(const group of groups){
+  const accountType=group.account_type;
+  for(const raw of group.list||[]){
+   const id=raw?.bizusername||raw?.biz_name||'';
+   if(typeof id!=='string'||!id)continue;
+   const account={id,name:raw.nick_name||'',starred:!!raw.top_flag,account_type:accountType,service_type:group.service_type};
+   if(!accounts.has(id)||accountType==='service')accounts.set(id,account);
+  }
+ }
+ return [...accounts.values()];
+}
 function call(method,params={},sid='',timeout=22000){return new Promise((resolve,reject)=>{const id=++seq,key=`${sid}:${id}`;const timer=setTimeout(()=>{pending.delete(key);reject(Error(mutationSent?'操作请求后连接超时，请先核实状态':'微信连接未响应，尚未发出操作请求'))},timeout);pending.set(key,{resolve,reject,timer});ws.send(JSON.stringify({id,method,params,...(sid?{sessionId:sid}:{})}))})}
 async function evaluate(expression){const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},session);if(r.exceptionDetails||!r.result?.value)throw Error('公众号页面执行失败');if(r.result.value.error)throw Error(r.result.value.error);return r.result.value}
 const guard=String.raw`if(!/^weixin:\/\/resourceid\/Subscription(?:Profile|Disorder)\//.test(location.href)||!window.WeixinJSBridge)return resolve({error:'公众号页面已关闭'});`;
@@ -31,7 +44,8 @@ try{
   if(!target)throw Error('请在微信打开公众号页面，然后重新连接');
   ({sessionId:session}=await call('Target.attachToTarget',{targetId:target.targetId,flatten:true}));
   if(input.action==='list'){
-   const result=await evaluate(`new Promise(resolve=>{${guard}const timer=setTimeout(()=>resolve({error:'读取公众号超时'}),16000);WeixinJSBridge.invoke('H5ExtTransfer',{cgi_cmdid:29175,url:'/cgi-bin/mmbiz-bin/bizattr/getbizlatestitemlisth5',scope:'subscriptions',req_json:JSON.stringify({scene:16,BaseRequest:{SessionKey:'',Uin:0,DeviceID:'',ClientVersion:0,DeviceType:'',Scene:0}})},r=>{clearTimeout(timer);try{const d=JSON.parse(r?.jsapi_resp?.resp_json||'{}');if(d.BaseResponse?.Ret!==0||!Array.isArray(d.list))return resolve({error:'微信未返回有效账号列表'});resolve({accounts:d.list.filter(a=>typeof a.biz_name==='string'&&a.biz_name).map(a=>({id:a.biz_name,name:a.nick_name||'',starred:!!a.top_flag}))})}catch{resolve({error:'账号列表解析失败'})}})})`);
+   const normalize=normalizeContactLists.toString();
+   const result=await evaluate(`new Promise(resolve=>{${guard}let settled=false;const finish=value=>{if(settled)return;settled=true;clearTimeout(timer);resolve(value)},timer=setTimeout(()=>finish({error:'读取公众号超时'}),20000),request=serviceType=>new Promise(done=>WeixinJSBridge.invoke('H5ExtTransfer',{cgi_cmdid:27493,url:'/cgi-bin/mmbiz-bin/bizattr/getusercontactlisth5',scope:'subscriptions',req_json:JSON.stringify({bizuserattr_servicetype:serviceType,get_all:true,bizusername:[],BaseRequest:{SessionKey:'',Uin:0,DeviceID:'',ClientVersion:0,DeviceType:'',Scene:0}})},r=>{try{const d=JSON.parse(r?.jsapi_resp?.resp_json||'{}');if(d.BaseResponse?.Ret!==0||!Array.isArray(d.contact_list))return done({error:'微信未返回有效账号列表'});done({service_type:serviceType,account_type:serviceType===1?'service':'subscription',list:d.contact_list})}catch{done({error:'账号列表解析失败'})}}));Promise.all([request(0),request(1)]).then(groups=>{const failed=groups.find(group=>group.error);if(failed)return finish(failed);const normalize=${normalize},accounts=normalize(groups),counts={subscription:accounts.filter(a=>a.account_type==='subscription').length,service:accounts.filter(a=>a.account_type==='service').length};finish({accounts,counts:{...counts,total:accounts.length}})}).catch(()=>finish({error:'账号列表解析失败'}))})`);
    await identityGuard();console.log(JSON.stringify({...result,capturedAt:new Date().toISOString(),profile_key:input.identity.profile_key}));
   }else{
    if(typeof input.id!=='string')throw Error('无效账号');

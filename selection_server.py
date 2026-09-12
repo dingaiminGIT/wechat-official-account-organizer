@@ -168,7 +168,9 @@ def connect():
             for k in ('unfollowed_at','refollowed_at','history_started_at','history_expires_at'):
                 if k in old[account_id]:a[k]=old[account_id][k]
     for account_id,a in old.items():
-        if account_id not in fresh and (a.get('subscribed') is False or a.get('was_unfollowed')):fresh[account_id]=a
+        if account_id not in fresh and (a.get('subscribed') is False or a.get('was_unfollowed')):
+            # Catalogs before v0.5.0 only contained subscription accounts.
+            a.setdefault('account_type','subscription');a.setdefault('service_type',0);fresh[account_id]=a
     listing['accounts']=list(fresh.values())
     verify_identity(identity)
     with LOCK:

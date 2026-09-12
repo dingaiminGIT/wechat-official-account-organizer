@@ -32,7 +32,7 @@ AI 编程对我最大的意义，也正在这里。不是凭空想一个大产�
 
 ## 它怎么用
 
-打开微信和应用，点一下连接，再在微信里随便打开一个小程序的内容页，公众号列表就会被读出来。
+打开微信和应用，点一下连接，再在微信里随便打开一个小程序的内容页，公众号列表就会被读出来。列表会区分订阅号和服务号，两类账号都能单独筛选和批量处理。
 
 接下来先做最重要的一件事：把肯定要留下的号加入白名单。然后搜索、翻页、勾选，可以选当前页，也可以全选所有可取关账号。白名单里的号会自动排除。
 
@@ -95,7 +95,7 @@ AI 编程对我最大的意义，也正在这里。不是凭空想一个大产�
 
 [wechat-official-account-organizer](https://github.com/dingaiminGIT/wechat-official-account-organizer)
 
-[直接下载 Apple Silicon 版 DMG](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.4/WeChatOrganizer-v0.4.4-apple-silicon.dmg)
+[直接下载 Apple Silicon 版 DMG](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.5.0/WeChatOrganizer-v0.5.0-apple-silicon.dmg)
 
 最后补两句使用边界：底层依赖 WMPFDebugger，所以项目按 GPLv2 开源；目前只支持 Apple Silicon Mac，GitHub 已提供可以直接下载的 DMG。安装包还没有经过 Apple 签名和公证。第一次打开时，请在 Finder 的“应用程序”文件夹里右键点击「批量取关公众号.app」，然后选择“打开”。正式使用前，还是建议先拿一两个不重要的账号试验。
 

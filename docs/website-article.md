@@ -95,9 +95,9 @@ AI 编程最适合干这种事。一个念头未必值得组团队、画商业�
 
 这里有一个容易误解的地方：界面里已经能看到公众号，不代表实时连接还在。列表可以来自上次保存在本机的缓存，所以断线后仍能搜索、筛选和生成清单；真正执行取关时，才需要重新打开一个小程序恢复连接。现在应用会把“缓存列表”和“实时连接”分开提示，不再让人对着已有列表猜为什么还要开小程序。
 
-涉及批量操作，我给执行流程设了几道不随模式关闭的刹车：清单绑定当前微信账号与会话；白名单在执行前再次拦截；必须收到微信的成功回执；超时、身份变化或结果异常就暂停。默认的超稳妥模式还会在每项操作前后查询关注状态。快速模式和超级快速模式不做这两次查询，因此界面会明确写「未复核」，不会把微信回执冒充成状态确认。
+现在列表会区分订阅号和服务号，两类账号都能单独筛选和批量处理。涉及批量操作，我给执行流程设了几道不随模式关闭的刹车：清单绑定当前微信账号与会话；白名单在执行前再次拦截；必须收到微信的成功回执；超时、身份变化或结果异常就暂停。默认的超稳妥模式还会在每项操作前后查询关注状态。快速模式和超级快速模式不做这两次查询，因此界面会明确写「未复核」，不会把微信回执冒充成状态确认。
 
-[下载 Apple Silicon 版 DMG](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.4.4/WeChatOrganizer-v0.4.4-apple-silicon.dmg) · [查看源代码](https://github.com/dingaiminGIT/wechat-official-account-organizer)
+[下载 Apple Silicon 版 DMG](https://github.com/dingaiminGIT/wechat-official-account-organizer/releases/download/v0.5.0/WeChatOrganizer-v0.5.0-apple-silicon.dmg) · [查看源代码](https://github.com/dingaiminGIT/wechat-official-account-organizer)
 
 因为项目包含 GPLv2 的 WMPFDebugger，整个仓库也按 GPLv2 开源；如果分发修改版，需要继续提供对应源码并保留许可证。当前版本还没有经过 Apple 签名和公证。第一次打开时，请在 Finder 的“应用程序”文件夹里右键点击「批量取关公众号.app」，然后选择“打开”。
 
